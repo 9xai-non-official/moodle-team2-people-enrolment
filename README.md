@@ -3,8 +3,18 @@
 Four Days Inside Moodle · HTU · 2026-07-20 → 2026-07-23
 
 **Area:** how a person gets into a course, and what they're allowed to do once they're there.
-**Target under investigation:** Moodle 5.2.1+ (build 20260714)
+**Target under investigation:** Moodle **5.3dev** (Build 20260605, `MATURITY_ALPHA`) — see [open-questions.md](open-questions.md) Q4 for why, and how we mitigate it.
 **Stack:** FastAPI (Python) + React (TypeScript). No PHP. Moodle is read, never modified.
+
+## Team
+
+| GitHub | |
+|---|---|
+| [@sadder-htu](https://github.com/sadder-htu) | Mahmoud Sadder |
+| [@Khaled-Saleh-KL1](https://github.com/Khaled-Saleh-KL1) | Khaled Saleh |
+| [@YAMANOE](https://github.com/YAMANOE) | |
+| [@psdew2ewqws](https://github.com/psdew2ewqws) | |
+| [@mahdianagreh](https://github.com/mahdianagreh) | |
 
 ---
 
@@ -69,4 +79,29 @@ the reasoning exposed rather than hidden. If only one thing works on Thursday, i
 
 ## Setup
 
-> Not yet — no Moodle is configured. See [open-questions.md](open-questions.md) Q1 before installing anything.
+Moodle runs locally via **Moodle4Mac (`Moodle4Mac-503.dmg`)**, which bundles Apache + PHP + MySQL
+through MAMP. Start MAMP, then:
+
+| | |
+|---|---|
+| Site | http://localhost:8888/moodle503 |
+| **Source to read** | `/Applications/MAMP/htdocs2/moodle503/public` |
+| MySQL | port **8889** (not 3306) · db `moodle503` · user `moodle` |
+| Table prefix | `mdl_` |
+| moodledata | `/Applications/MAMP/data/moodle503` |
+
+**Read the source at the path above, not a separately downloaded copy.** Running and reading the
+same build is what keeps a genuine finding distinguishable from version drift.
+
+Query the database with the helper — it reads credentials from Moodle's `config.php` at runtime,
+so no password is stored in this repo:
+
+```bash
+./db.sh "SELECT id, shortname, archetype FROM mdl_role ORDER BY sortorder;"
+./db.sh                        # interactive shell
+./db.sh -f queries/thing.sql   # run a file
+```
+
+> ⚠️ **The local site is a blank demo install** — 2 courses, 1 real user, **0 groups**. Four of the
+> five hard cases cannot be run on it. We are blocked on the organiser's course data:
+> [open-questions.md](open-questions.md) Q1.
