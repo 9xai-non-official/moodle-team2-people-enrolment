@@ -1,0 +1,6 @@
+-- Schema — People & Enrolment
+-- Table prefix is a per-install choice; not yet known (no config.php exists).
+-- Use <prefix> as placeholder until confirmed, then find/replace once.
+--
+-- Annotate every table with WHY it exists and what surprised you about it.
+-- An un-annotated schema dump scores nothing; the annotations are the deliverable.
