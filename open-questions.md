@@ -18,6 +18,23 @@ data hides the exact problems the hard cases are about, and breaks Thursday's cr
 `hackathon-files.zip`: no `.sql`, `.sql.gz`, `.dump`, or `.mbz`. The only `.mbz` files on the
 machine are Moodle's own PHPUnit fixtures.
 
+**Now confirmed from the live database** (2026-07-20, local instance):
+
+| courses | real users | enrol rows | user_enrolments | role assigns | groups | group members |
+|---|---|---|---|---|---|---|
+| 2 | 1 | 6 | 2 | 2 | **0** | **0** |
+
+The site is a blank demo install. Concretely, this means:
+
+- **Hard cases 3 and 4 cannot be run at all** — both are about group visibility, and there are
+  zero groups and zero group members.
+- **Hard case 1 cannot be run** — it needs manual *plus* an auto-sync method, but only `manual`,
+  `guest`, and `self` plugins have instances here. No cohort sync exists.
+- **Hard case 5 cannot be run** — it needs three years of history across deleted courses.
+  There is one real user and two courses.
+
+So this is not a nice-to-have. Four of the five hard cases are blocked on getting their data.
+
 Ask specifically:
 - Is there a **shared Moodle instance** all three teams point at? (URL + admin credentials)
 - Or a **database dump / course backup** we're meant to restore locally?
@@ -60,21 +77,59 @@ morning is what kills teams.
 
 Move these into `rules-catalogue.md` once answered with evidence.
 
-### 🔴 Q4 — Version mismatch with the brief
+### 🟡 Q4 — We are investigating a pre-release build. Does it matter?
 
-The tree on disk is **Moodle 5.2.1+**, which is current, not the twenty-year-old system the
-brief describes. The archaeology is *inside* the code — old decisions preserved for backwards
-compatibility — rather than in the version number. Worth checking whether the shared instance
-(if there is one) runs the same version; if it's older, our findings may not transfer.
+**Decision made 2026-07-20:** we are running **Moodle 5.3dev (Build 20260605), `MATURITY_ALPHA`**,
+installed via `Moodle4Mac-503.dmg`. Moodle 5.3 does not reach general release until 2026-10-05.
 
-### 🟡 Q5 — What is the table prefix?
+This was not the original plan — we had also downloaded the 5.2.1 stable source
+(build 20260714, i.e. *newer* than this alpha snapshot). Recording the reasoning honestly:
 
-Unknown until a Moodle is actually configured — no `config.php` exists yet, only the untouched
-`config-dist.php`. Every query we write in this repo should use a placeholder until confirmed,
-because the prefix is a per-install choice, not a constant.
+- **Risk:** we are documenting behaviour from unreleased alpha code. Anything we catalogue could
+  change before 5.3 ships, and it may not match what Teams 1 and 3 see if they run stable.
+- **Mitigation:** we read source from the *same tree we run* (`/Applications/MAMP/htdocs2/moodle503/public`),
+  not from the separate 5.2.1 download. So any disagreement between code and observed behaviour
+  is a genuine finding, not version drift.
+- **Why it's probably tolerable:** enrolment, roles/capabilities, and groups are the oldest and
+  most stable subsystems in Moodle. Alpha churn lands on new features, not `lib/accesslib.php`.
+
+**Open:** if Teams 1/3 or the shared instance run 5.2 or older, re-check any rule that looks
+version-sensitive. MAMP's `htdocs2/` can host a second site, so standing up 5.2.1 alongside for
+differential testing is ~15 minutes if it becomes necessary — and any behavioural difference
+between the two would itself be a catalogue entry.
+
+### 🟢 Q6 — Why did MySQL 8.0.35 install cleanly?
+
+Moodle 5.2.1's `admin/environment.xml` states a minimum of **MySQL 8.4**, and Moodle's own
+download page warns MAMP's MySQL doesn't meet 5.x requirements. Yet this install runs on the
+bundled **MySQL 8.0.35** without complaint. Either 5.3 relaxed the requirement or the installer
+let it through. Low priority, but if we hit strange SQL behaviour, look here first.
 
 ---
 
 ## Answered
 
-<!-- move things here with the answer and the date, don't delete them -->
+### ✅ Q5 — What is the table prefix? → `mdl_` (2026-07-20)
+
+Confirmed from `/Applications/MAMP/htdocs2/moodle503/config.php`. Still a per-install choice, so
+if we ever point at the organiser's shared instance, re-check it before trusting any query.
+
+### ✅ Q7 — How do we get at the database? → `./db.sh` (2026-07-20)
+
+MAMP puts MySQL on a non-standard port and buries the client. Recorded so nobody re-derives it:
+
+| | |
+|---|---|
+| Site | http://localhost:8888/moodle503 |
+| MySQL port | **8889** (not 3306) |
+| mysql client | `/Applications/MAMP/Library/bin/mysql80/bin/mysql` |
+| DB / user | `moodle503` / `moodle` |
+| Source tree | `/Applications/MAMP/htdocs2/moodle503/public` |
+| moodledata | `/Applications/MAMP/data/moodle503` |
+
+`./db.sh "SELECT ..."` wraps all of it and reads credentials from `config.php` at runtime,
+so no password is committed to this repo.
+
+**Baseline for later comparison** — the permission surface is **757 rows in `mdl_capabilities`**,
+and 8 roles ship by default (manager, coursecreator, editingteacher, teacher, student, guest,
+user, frontpage).
