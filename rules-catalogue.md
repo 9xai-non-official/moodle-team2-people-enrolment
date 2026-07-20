@@ -30,6 +30,21 @@ it doesn't tell you what happens. Run it. If you genuinely can't run it, file th
 
 ---
 
+## Rule ID namespaces
+
+The team has split this area by owner (see [tasks/](tasks/)). Each owner gets a prefix so
+everyone can add rules here concurrently without ID collisions:
+
+| Prefix | Area | Owner | Source |
+|---|---|---|---|
+| `T2-GRP-XXX` | Groups, groupings, visibility, TA scope | Mahmoud | [tasks/03_mahmoud_groups_testing.md](tasks/03_mahmoud_groups_testing.md) |
+| `T2-ENR-XXX` | Enrolment methods | TBD | not yet received |
+| `T2-ROL-XXX` | Roles & capabilities / permission engine | TBD (likely Yaman, as anchor reviewer) | not yet received |
+| `T2-PRG-XXX` | Progress & completion | TBD | not yet received |
+
+Generic `R-000`-style entries below predate this split — fine to keep, but new rules should use
+the prefixed scheme once you know which file you're working from.
+
 ## Entry format
 
 Copy this block for each rule.
