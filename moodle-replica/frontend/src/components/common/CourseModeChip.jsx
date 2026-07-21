@@ -3,7 +3,7 @@
 // modes are silently ignored — the "forced" badge warns before anyone
 // wonders why an activity setting does nothing.
 import { useEffect, useState } from "react";
-import { apiGet } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 import Badge from "./Badge";
 
 const MODE_VARIANT = { none: "neutral", separate: "amber", visible: "blue" };
@@ -14,7 +14,7 @@ export default function CourseModeChip({ courseId }) {
   useEffect(() => {
     setCourse(null);
     if (!courseId) return;
-    apiGet("/api/courses?include_deleted=1")
+    cachedGet("/api/courses?include_deleted=1")
       .then((list) => setCourse(list.find((c) => c.id === courseId) ?? null))
       .catch(() => setCourse(null)); // chip is decoration — never blocks the page
   }, [courseId]);

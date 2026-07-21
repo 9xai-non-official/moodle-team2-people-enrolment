@@ -2,7 +2,7 @@
 // sends the actor id with permission-sensitive requests; the header select
 // is how the demo swaps between admin1 / teacher.a / ta.a / student.a / …
 import { createContext, useContext, useEffect, useState } from "react";
-import { apiGet } from "../api";
+import { cachedGet } from "../lib/catalog";
 
 const ActingUserContext = createContext({
   users: [],
@@ -17,7 +17,7 @@ export function ActingUserProvider({ children }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    apiGet("/api/users")
+    cachedGet("/api/users")
       .then((list) => {
         setUsers(list);
         if (list.length) setActingUserId((cur) => cur ?? list[0].id);
