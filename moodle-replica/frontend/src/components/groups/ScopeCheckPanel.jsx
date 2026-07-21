@@ -2,7 +2,8 @@
 // group scope. The verdict + reasons come straight from the API — no rule logic
 // lives here. Quick-toggle swaps the actor between the scoped and all-groups TA.
 import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../../api";
+import { fetchActivityPolicies, accessCheck } from "../../lib/groupsApi";
+import { cachedGet } from "../../lib/catalog";
 import { useActingUser } from "../../context/ActingUser";
 import UserSelect from "../common/UserSelect";
 import ReasonList from "../common/ReasonList";
@@ -23,11 +24,28 @@ export default function ScopeCheckPanel({ courseId }) {
     if (actingUser) setActorId((cur) => cur ?? actingUser.id);
   }, [actingUser]);
 
+  // Quick-toggle personas resolved by USERNAME — ids differ between the mock
+  // seed and the real DB (hardcoded ids broke real mode; caught in testing).
+  const [personas, setPersonas] = useState({});
+  useEffect(() => {
+    cachedGet("/api/users")
+      .then((us) =>
+        setPersonas(
+          Object.fromEntries(
+            us
+              .filter((u) => ["ta.a", "ta.allgroups"].includes(u.username))
+              .map((u) => [u.username, u.id]),
+          ),
+        ),
+      )
+      .catch(() => setPersonas({}));
+  }, []);
+
   // activity options reuse the policy list — one source of the effective mode.
   useEffect(() => {
     setListError(null);
     setResult(null);
-    apiGet(`/api/groups/courses/${courseId}/activity-policies`)
+    fetchActivityPolicies(courseId)
       .then((rows) => {
         setActivities(rows);
         setActivityId(rows.length ? rows[0].activity_id : null);
@@ -41,7 +59,7 @@ export default function ScopeCheckPanel({ courseId }) {
     setCheckError(null);
     setResult(null);
     try {
-      const r = await apiPost("/api/groups/access-check", {
+      const r = await accessCheck({
         actor_id: actorId,
         target_user_id: targetId,
         activity_id: activityId,
@@ -57,10 +75,18 @@ export default function ScopeCheckPanel({ courseId }) {
   return (
     <div>
       <div className="form-row">
-        <button className="btn" onClick={() => setActorId(3)}>
+        <button
+          className="btn"
+          disabled={!personas["ta.a"]}
+          onClick={() => setActorId(personas["ta.a"])}
+        >
           as ta.a
         </button>
-        <button className="btn" onClick={() => setActorId(4)}>
+        <button
+          className="btn"
+          disabled={!personas["ta.allgroups"]}
+          onClick={() => setActorId(personas["ta.allgroups"])}
+        >
           as ta.allgroups
         </button>
       </div>

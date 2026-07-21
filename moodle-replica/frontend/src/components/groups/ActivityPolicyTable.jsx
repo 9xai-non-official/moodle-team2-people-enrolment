@@ -1,7 +1,7 @@
 // Per-activity group policy. Highlighted rows are where the configured mode is
 // silently ignored because the course forces its own mode (rule GRP-012).
 import { useEffect, useState } from "react";
-import { apiGet } from "../../api";
+import { fetchActivityPolicies } from "../../lib/groupsApi";
 import DataTable from "../common/DataTable";
 import Badge from "../common/Badge";
 
@@ -29,7 +29,7 @@ export default function ActivityPolicyTable({ courseId }) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    apiGet(`/api/groups/courses/${courseId}/activity-policies`)
+    fetchActivityPolicies(courseId)
       .then(setRows)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

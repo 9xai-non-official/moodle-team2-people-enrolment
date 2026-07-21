@@ -31,3 +31,18 @@ async def get_course(course_id: int):
     if not row:
         raise HTTPException(status_code=404, detail=f"course {course_id} not found")
     return row
+
+
+@router.get("/{course_id}/activities")
+async def list_activities(course_id: int):
+    """Activities of a course (Team-1 projection reads — bootstrap scope).
+    Powers the frontend's activity-policy table over Mahmoud's per-activity
+    policy endpoint."""
+    return await db.fetch_all(
+        "select id, course_id, name, activity_type, "
+        "group_mode::text as group_mode, grouping_id, visible, "
+        "completion_enabled, (deleted_at is not null) as deleted "
+        "from course_activity where course_id = $1 and deleted_at is null "
+        "order by id",
+        course_id,
+    )
