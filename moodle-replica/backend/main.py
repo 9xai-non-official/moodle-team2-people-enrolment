@@ -5,15 +5,27 @@ A minimal, runnable API scaffold around Moodle's core "people & enrolment"
 concepts. Endpoints are stubs that return placeholder data so the frontend
 has something to talk to; fill in real logic + a database later.
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import db
 from app.routers import users, courses, enrolment, roles, groups
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await db.connect()
+    yield
+    await db.disconnect()
+
 
 app = FastAPI(
     title="Moodle Replica API",
     description="Skeleton API for the people & enrolment module.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Allow the Vite dev server (localhost:5173) to call this API during development.
@@ -33,9 +45,28 @@ app.add_middleware(
 
 
 @app.get("/api/health", tags=["health"])
-def health():
-    """Simple liveness check the frontend can ping."""
-    return {"status": "ok", "service": "moodle-replica-api", "version": "0.1.0"}
+async def health():
+    """Liveness + DB reachability (proves the deployed schema answers)."""
+    out = {"status": "ok", "service": "moodle-replica-api", "version": "0.1.0",
+           "database": "not configured"}
+    if db.connected():
+        counts = await db.fetch_one(
+            "select (select count(*) from role) as roles, "
+            "(select count(*) from capability) as capabilities"
+        )
+        out["database"] = {"connected": True, **counts}
+    return out
+
+
+@app.get("/api/stats", tags=["health"])
+async def stats():
+    """Dashboard cards: seeded counts from the live DB."""
+    return await db.fetch_one(
+        "select (select count(*) from app_user where deleted_at is null) as users, "
+        "(select count(*) from course where deleted_at is null) as courses, "
+        "(select count(*) from enrolment) as enrolments, "
+        "(select count(*) from course_group) as groups"
+    )
 
 
 # Feature routers — each is a skeleton, ready to grow.
