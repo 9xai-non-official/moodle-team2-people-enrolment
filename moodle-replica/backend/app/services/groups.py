@@ -167,7 +167,9 @@ async def _is_active_enrolled(user_id: int, course_id: int) -> bool:
             course_id,
         )
         return row is not None
-    return await is_active_enrolled(user_id, course_id)
+    # Yaman's frozen signature takes the db module first (arity crash found
+    # live — the mirror image of the conn bug on his side of the seam).
+    return await is_active_enrolled(db, user_id, course_id)
 
 
 async def _has_accessallgroups(user_id: int, course_id: int) -> bool:

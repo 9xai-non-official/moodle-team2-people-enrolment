@@ -67,6 +67,44 @@ export const routes = [
   },
   {
     method: "POST",
+    pattern: /^\/api\/groups\/courses\/(\d+)\/groups$/,
+    handler: (m, body) => {
+      const id = Math.max(0, ...GROUPS.map((g) => g.id)) + 1;
+      const group = {
+        id,
+        course_id: Number(m[1]),
+        name: body.name,
+        enrolment_key: body.enrolment_key || null,
+        participation: true,
+      };
+      GROUPS.push(group);
+      return {
+        id,
+        name: group.name,
+        enrolment_key: !!group.enrolment_key,
+        participation: true,
+        members: [],
+      };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/groups\/(\d+)$/,
+    handler: (m) => {
+      const groupId = Number(m[1]);
+      const idx = GROUPS.findIndex((g) => g.id === groupId);
+      if (idx < 0) throw new ApiError(404, { detail: "group not found" });
+      GROUPS.splice(idx, 1);
+      // GRP-001: drop the group and its memberships only — never ENROLMENTS.
+      for (let i = GROUP_MEMBERS.length - 1; i >= 0; i--) {
+        if (GROUP_MEMBERS[i].group_id === groupId) GROUP_MEMBERS.splice(i, 1);
+      }
+      for (const gr of GROUPINGS) gr.group_ids = gr.group_ids.filter((gid) => gid !== groupId);
+      return null; // 204
+    },
+  },
+  {
+    method: "POST",
     pattern: /^\/api\/groups\/(\d+)\/members$/,
     handler: (m, body) => {
       const groupId = Number(m[1]);
@@ -142,6 +180,27 @@ export const routes = [
           grouping: grouping ? { id: grouping.id, name: grouping.name } : null,
         };
       });
+    },
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/groups\/activities\/(\d+)$/,
+    handler: (m, body) => {
+      const activity = ACTIVITIES.find((a) => a.id === Number(m[1]));
+      if (!activity) throw new ApiError(404, { detail: "activity not found" });
+      const course = courseById(activity.course_id);
+      // null is meaningful (inherit / no grouping); an absent key is left as-is.
+      if ("group_mode" in body) activity.group_mode = body.group_mode;
+      if ("grouping_id" in body) activity.grouping_id = body.grouping_id;
+      const grouping = activity.grouping_id
+        ? GROUPINGS.find((g) => g.id === activity.grouping_id)
+        : null;
+      return {
+        configured_mode: activity.group_mode,
+        effective_mode: effectiveMode(activity, course),
+        course_mode_forced: course.force_group_mode,
+        grouping: grouping ? { id: grouping.id, name: grouping.name } : null,
+      };
     },
   },
   {

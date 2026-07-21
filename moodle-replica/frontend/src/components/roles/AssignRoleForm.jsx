@@ -3,8 +3,9 @@
 // user — acting as a non-editing teacher visibly shrinks the options.
 // Refusals from the backend render verbatim through ReasonList.
 import { useEffect, useState } from "react";
-import { apiGet, apiPost, ApiError } from "../../api";
+import { apiGet, apiPost, apiDelete, ApiError } from "../../api";
 import { useActingUser } from "../../context/ActingUser";
+import RoleCreateForm from "./RoleCreateForm";
 import DataTable from "../common/DataTable";
 import UserSelect from "../common/UserSelect";
 import ReasonList from "../common/ReasonList";
@@ -21,6 +22,7 @@ export default function AssignRoleForm() {
   const [loading, setLoading] = useState(false);
   const [tableError, setTableError] = useState(null);
   const [tick, setTick] = useState(0);
+  const [roleTick, setRoleTick] = useState(0);
 
   useEffect(() => {
     apiGet("/api/roles/contexts")
@@ -42,7 +44,7 @@ export default function AssignRoleForm() {
         if (list.length) setRoleId(list[0].role_id);
       })
       .catch((e) => setReasons([e.message]));
-  }, [contextId, actingUser]);
+  }, [contextId, actingUser, roleTick]);
 
   useEffect(() => {
     if (!contextId) return;
@@ -69,6 +71,13 @@ export default function AssignRoleForm() {
       .catch((e) => setReasons(e instanceof ApiError ? e.reasons : [e.message]));
   }
 
+  function unassign(id) {
+    setReasons([]);
+    apiDelete(`/api/roles/assignments/${id}`)
+      .then(() => setTick((t) => t + 1)) // refetch table
+      .catch((e) => setReasons(e instanceof ApiError ? e.reasons : [e.message]));
+  }
+
   const columns = [
     { key: "user", label: "User", render: (r) => r.user.full_name },
     { key: "role", label: "Role", render: (r) => r.role.short_name },
@@ -80,12 +89,22 @@ export default function AssignRoleForm() {
         <span className="chip">{r.component ? `${r.component} #${r.item_id}` : "manual"}</span>
       ),
     },
+    {
+      key: "actions",
+      label: "",
+      render: (r) => (
+        <button className="btn btn--danger" onClick={() => unassign(r.id)}>
+          Unassign
+        </button>
+      ),
+    },
   ];
 
   const canSubmit = actingUser && contextId && roleId && userId;
 
   return (
     <div>
+      <RoleCreateForm onCreated={() => setRoleTick((t) => t + 1)} />
       <div className="panel">
         <div className="panel__title">Assign a role</div>
         <div className="form-row">

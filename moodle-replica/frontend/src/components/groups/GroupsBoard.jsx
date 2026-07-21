@@ -4,11 +4,12 @@
 // No optimistic UI — every successful mutation refetches.
 import { useCallback, useEffect, useState } from "react";
 import { apiPost, apiDelete } from "../../api";
-import { fetchGroupsBoard } from "../../lib/groupsApi";
+import { fetchGroupsBoard, deleteGroup as apiDeleteGroup } from "../../lib/groupsApi";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import UserSelect from "../common/UserSelect";
 import ReasonList from "../common/ReasonList";
+import GroupCreateForm from "./GroupCreateForm";
 
 // provenance: '' = added by hand; enrol_* = owned by an enrolment sync.
 const PROVENANCE = {
@@ -54,6 +55,22 @@ export default function GroupsBoard({ courseId }) {
     }
   }
 
+  async function removeGroup(groupId, name) {
+    if (
+      !window.confirm(
+        `Delete "${name}"? This removes the group and its memberships — users and enrolments untouched (GRP-001).`,
+      )
+    )
+      return;
+    setNotice(null);
+    try {
+      await apiDeleteGroup(groupId);
+      load();
+    } catch (e) {
+      setNotice({ groupId, reasons: e.reasons?.length ? e.reasons : [e.message] });
+    }
+  }
+
   async function removeMember(groupId, userId, force = false) {
     setNotice(null);
     try {
@@ -70,13 +87,17 @@ export default function GroupsBoard({ courseId }) {
     }
   }
 
-  if (loading) return <p className="muted">Loading groups…</p>;
-  if (error) return <div className="error-banner">{error}</div>;
-  if (groups.length === 0) return <p className="muted">No groups in this course.</p>;
-
   return (
     <div>
-      {groups.map((g) => (
+      <GroupCreateForm courseId={courseId} onCreated={load} />
+      {loading && <p className="muted">Loading groups…</p>}
+      {error && <div className="error-banner">{error}</div>}
+      {!loading && !error && groups.length === 0 && (
+        <p className="muted">No groups in this course.</p>
+      )}
+      {!loading &&
+        !error &&
+        groups.map((g) => (
         <div className="panel" key={g.id}>
           <div className="panel__title">
             {g.name}
@@ -90,6 +111,9 @@ export default function GroupsBoard({ courseId }) {
                 no participation
               </Badge>
             )}
+            <button className="btn btn--danger" onClick={() => removeGroup(g.id, g.name)}>
+              Delete group
+            </button>
           </div>
 
           <div>

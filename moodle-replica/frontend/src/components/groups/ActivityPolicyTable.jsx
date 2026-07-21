@@ -1,9 +1,10 @@
 // Per-activity group policy. Highlighted rows are where the configured mode is
 // silently ignored because the course forces its own mode (rule GRP-012).
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchActivityPolicies } from "../../lib/groupsApi";
 import DataTable from "../common/DataTable";
 import Badge from "../common/Badge";
+import ActivityPolicyEditor from "./ActivityPolicyEditor";
 
 const COLUMNS = [
   { key: "name", label: "Activity" },
@@ -25,8 +26,9 @@ export default function ActivityPolicyTable({ courseId }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
     setError(null);
     fetchActivityPolicies(courseId)
@@ -34,6 +36,10 @@ export default function ActivityPolicyTable({ courseId }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [courseId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div>
@@ -44,6 +50,7 @@ export default function ActivityPolicyTable({ courseId }) {
         error={error}
         empty="No activities in this course."
         rowKey={(r) => r.activity_id}
+        onRowClick={setEditing}
         rowClassName={(r) =>
           r.configured_mode && r.configured_mode !== r.effective_mode ? "row--highlight" : ""
         }
@@ -51,6 +58,17 @@ export default function ActivityPolicyTable({ courseId }) {
       <p className="muted">
         highlighted = configured setting silently ignored (course forces group mode)
       </p>
+      {editing && (
+        <ActivityPolicyEditor
+          activity={editing}
+          courseId={courseId}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
