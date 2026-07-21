@@ -4,6 +4,7 @@
 // straight from the API, nothing is computed here.
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 import DataTable from "../common/DataTable";
 import ContextPath from "../common/ContextPath";
 
@@ -26,7 +27,7 @@ export default function CapabilityEditor() {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    Promise.all([apiGet("/api/roles"), apiGet("/api/roles/contexts")])
+    Promise.all([cachedGet("/api/roles"), cachedGet("/api/roles/contexts")])
       .then(([r, c]) => {
         setRoles(r);
         setContexts(c);

@@ -1,6 +1,6 @@
 // User dropdown fed by /api/users. value = user id (number) or "".
 import { useEffect, useState } from "react";
-import { apiGet } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 
 export default function UserSelect({
   value,
@@ -12,7 +12,7 @@ export default function UserSelect({
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    apiGet("/api/users")
+    cachedGet("/api/users")
       .then(setUsers)
       .catch((e) => setError(e.message));
   }, []);

@@ -4,7 +4,8 @@
 // gate — the display never short-circuits), the per-role capability
 // resolution, and the reasons. No business rules live in this component.
 import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../../api";
+import { apiPost } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 import { useActingUser } from "../../context/ActingUser";
 import UserSelect from "../common/UserSelect";
 import ContextPath from "../common/ContextPath";
@@ -45,10 +46,10 @@ export default function PermissionChecker({ replay }) {
 
   useEffect(() => {
     Promise.all([
-      apiGet("/api/roles/capabilities"),
-      apiGet("/api/roles/contexts"),
-      apiGet("/api/roles"),
-      apiGet("/api/users"),
+      cachedGet("/api/roles/capabilities"),
+      cachedGet("/api/roles/contexts"),
+      cachedGet("/api/roles"),
+      cachedGet("/api/users"),
     ])
       .then(([caps, ctxs, rs, us]) => {
         setCapabilities(caps);
