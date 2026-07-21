@@ -1,0 +1,214 @@
+// Groups domain mocks (task 06 §4.4). Handlers mutate the seed arrays in place
+// so the demo's add/remove flows are stateful. Delete this file when the real
+// /api/groups endpoints land — nothing else changes (task 06 §8).
+import { ApiError } from "../errors";
+import {
+  GROUPS,
+  GROUP_MEMBERS,
+  GROUPINGS,
+  ACTIVITIES,
+  ROLE_ASSIGNMENTS,
+  ROLE_CAPABILITIES,
+  userById,
+  courseById,
+  contextForCourse,
+  groupsOfUser,
+  effectiveStatus,
+} from "./seed";
+
+// Effective group mode: a course that forces its mode silently overrides every
+// per-activity setting (rule GRP-012). Single source so policy + access-check agree.
+const effectiveMode = (activity, course) =>
+  course.force_group_mode ? course.group_mode : (activity.group_mode ?? course.group_mode);
+
+// site:accessallgroups for one actor at a course context: walk the role
+// capability sheet along the context path — deepest override wins, prohibit is
+// sticky. Mirrors the resolver the roles domain uses (~15 lines).
+function resolvesAccessAllGroups(actorId, course) {
+  const ctx = contextForCourse(course.id);
+  const pathIds = ctx.path.split("/").filter(Boolean).map(Number); // e.g. [1, 10]
+  const roleIds = ROLE_ASSIGNMENTS.filter(
+    (a) => a.user_id === actorId && pathIds.includes(a.context_id),
+  ).map((a) => a.role_id);
+  let permission = "notset";
+  let depth = -1;
+  for (const rc of ROLE_CAPABILITIES) {
+    if (rc.capability !== "site:accessallgroups" || !roleIds.includes(rc.role_id)) continue;
+    const d = pathIds.indexOf(rc.context_id);
+    if (d < 0) continue;
+    if (rc.permission === "prohibit") return false; // sticky — can't be re-granted deeper
+    if (d >= depth) {
+      depth = d;
+      permission = rc.permission;
+    }
+  }
+  return permission === "allow";
+}
+
+export const routes = [
+  {
+    method: "GET",
+    pattern: /^\/api\/groups\/courses\/(\d+)\/groups$/,
+    handler: (m) => {
+      const courseId = Number(m[1]);
+      return GROUPS.filter((g) => g.course_id === courseId).map((g) => ({
+        id: g.id,
+        name: g.name,
+        enrolment_key: !!g.enrolment_key,
+        participation: g.participation,
+        members: GROUP_MEMBERS.filter((mm) => mm.group_id === g.id).map((mm) => ({
+          user_id: mm.user_id,
+          full_name: userById(mm.user_id)?.full_name ?? `user ${mm.user_id}`,
+          provenance: mm.component,
+          item_id: mm.item_id,
+        })),
+      }));
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/groups\/(\d+)\/members$/,
+    handler: (m, body) => {
+      const groupId = Number(m[1]);
+      const group = GROUPS.find((g) => g.id === groupId);
+      if (!group) throw new ApiError(404, { detail: "group not found" });
+      const course = courseById(group.course_id);
+      const userId = body.user_id;
+      // group membership does not imply enrolment: refuse non-active participants.
+      if (effectiveStatus(userId, course.id) !== "active") {
+        throw new ApiError(403, {
+          reasons: [
+            `user is not an active participant of ${course.short_name} — enrol them first (group membership does not imply enrolment)`,
+          ],
+        });
+      }
+      if (GROUP_MEMBERS.some((mm) => mm.group_id === groupId && mm.user_id === userId)) {
+        throw new ApiError(409, { reasons: [`already a member of ${group.name}`] });
+      }
+      const row = { group_id: groupId, user_id: userId, component: "", item_id: 0 };
+      GROUP_MEMBERS.push(row);
+      return row;
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/groups\/(\d+)\/members\/(\d+)$/,
+    handler: (m, body, query) => {
+      const groupId = Number(m[1]);
+      const userId = Number(m[2]);
+      const idx = GROUP_MEMBERS.findIndex(
+        (mm) => mm.group_id === groupId && mm.user_id === userId,
+      );
+      if (idx < 0) throw new ApiError(404, { detail: "not a member of this group" });
+      const row = GROUP_MEMBERS[idx];
+      // machine-owned rows come back on the next enrolment sync — refuse unless forced.
+      if (row.component !== "" && query.force !== "1") {
+        const reason = `membership owned by '${row.component}' (sync) — removing it by hand will be recreated on next sync`;
+        throw new ApiError(409, { reason, machine_owned: true, reasons: [reason] });
+      }
+      GROUP_MEMBERS.splice(idx, 1);
+      return null; // 204
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/groups\/courses\/(\d+)\/groupings$/,
+    handler: (m) => {
+      const courseId = Number(m[1]);
+      return GROUPINGS.filter((g) => g.course_id === courseId).map((g) => ({
+        id: g.id,
+        name: g.name,
+        groups: g.group_ids.map((gid) => {
+          const grp = GROUPS.find((x) => x.id === gid);
+          return { id: gid, name: grp?.name ?? `group ${gid}` };
+        }),
+      }));
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/groups\/courses\/(\d+)\/activity-policies$/,
+    handler: (m) => {
+      const courseId = Number(m[1]);
+      const course = courseById(courseId);
+      return ACTIVITIES.filter((a) => a.course_id === courseId).map((a) => {
+        const grouping = a.grouping_id ? GROUPINGS.find((g) => g.id === a.grouping_id) : null;
+        return {
+          activity_id: a.id,
+          name: a.name,
+          configured_mode: a.group_mode, // null → UI renders "— (inherit)"
+          effective_mode: effectiveMode(a, course),
+          forced: course.force_group_mode,
+          grouping: grouping ? { id: grouping.id, name: grouping.name } : null,
+        };
+      });
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/groups\/activities\/(\d+)\/allowed$/,
+    handler: (m, body, query) => {
+      const activity = ACTIVITIES.find((a) => a.id === Number(m[1]));
+      const course = courseById(activity.course_id);
+      const actorId = Number(query.actor_id);
+      if (resolvesAccessAllGroups(actorId, course)) {
+        return {
+          all_groups: true,
+          groups: GROUPS.filter((g) => g.course_id === course.id).map((g) => ({
+            id: g.id,
+            name: g.name,
+          })),
+          reason: "accessallgroups: allow — sees every group",
+        };
+      }
+      return {
+        all_groups: false,
+        groups: groupsOfUser(actorId, course.id).map((g) => ({ id: g.id, name: g.name })),
+        reason: "restricted to own groups (accessallgroups: prevent)",
+      };
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/groups\/access-check$/,
+    handler: (m, body) => {
+      const activity = ACTIVITIES.find((a) => a.id === body.activity_id);
+      const course = courseById(activity.course_id);
+      const mode = effectiveMode(activity, course);
+
+      // visible / none modes isolate nobody.
+      if (mode !== "separate") {
+        return { outcome: "allowed", reasons: [`group mode '${mode}' — no isolation`] };
+      }
+      // separate mode: accessallgroups sees past the walls.
+      if (resolvesAccessAllGroups(body.actor_id, course)) {
+        return { outcome: "allowed", reasons: ["accessallgroups: allow"] };
+      }
+      const actorGroups = groupsOfUser(body.actor_id, course.id);
+      const targetGroups = groupsOfUser(body.target_user_id, course.id);
+      const shared = actorGroups.filter((ag) => targetGroups.some((tg) => tg.id === ag.id));
+      if (shared.length) {
+        return { outcome: "allowed", reasons: [`shares ${shared[0].name}`] };
+      }
+      if (actorGroups.length === 0) {
+        return {
+          outcome: "denied",
+          reasons: ["you belong to no group in this course; separate mode hides everyone"],
+        };
+      }
+      // actor is grouped but shares nothing with the target → the target is invisible.
+      const label = contextForCourse(course.id).label;
+      const belongs = targetGroups.length
+        ? `target belongs to ${targetGroups[0].name} — outside your scope`
+        : "target belongs to no group you can see";
+      return {
+        outcome: "invisible",
+        reasons: [
+          "separate groups: you see only your own groups",
+          belongs,
+          `accessallgroups: prevent (override at ${label})`,
+        ],
+      };
+    },
+  },
+];
