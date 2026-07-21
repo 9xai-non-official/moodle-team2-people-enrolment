@@ -4,6 +4,8 @@ import { ActingUserProvider, useActingUser } from "./context/ActingUser";
 import { SelectedCourseProvider } from "./context/SelectedCourse";
 import { PAGES, NAV_ITEMS } from "./pages";
 import WelcomeTour, { tourSeen } from "./components/common/WelcomeTour";
+import CommandPalette from "./components/common/CommandPalette";
+import PersonaStrip from "./components/common/PersonaStrip";
 import { personaBlurb, personaLabel } from "./lib/personas";
 import { SCRIPT } from "./lib/presenterScript";
 import "./App.css";
@@ -107,6 +109,22 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Command-palette meta actions dispatch these; Shell owns the state they touch.
+  useEffect(() => {
+    const openTour = () => setTourOpen(true);
+    const togglePres = () =>
+      setPresenter((p) => {
+        localStorage.setItem("presenter", p ? "0" : "1");
+        return !p;
+      });
+    window.addEventListener("open-tour", openTour);
+    window.addEventListener("toggle-presenter", togglePres);
+    return () => {
+      window.removeEventListener("open-tour", openTour);
+      window.removeEventListener("toggle-presenter", togglePres);
+    };
+  }, []);
+
   useEffect(() => {
     apiGet("/api/health")
       .then((data) => setHealth(data.status === "ok" ? "online" : "degraded"))
@@ -137,7 +155,8 @@ function Shell() {
     <div className="app">
       <header className="app-header">
         <div className="brand">
-          Moodle Replica
+          WhoCan
+          <span className="brand__sub">people &amp; enrolment</span>
           {USE_MOCKS && <span className="mock-badge">MOCK DATA</span>}
         </div>
         <ActingUserSelect />
@@ -159,7 +178,9 @@ function Shell() {
           ?
         </button>
       </header>
+      <PersonaStrip />
       <WelcomeTour open={tourOpen} onClose={() => setTourOpen(false)} />
+      <CommandPalette onNavigate={setActive} />
       <ActivityBar />
       <WriteToast />
       {presenter && <PresenterCard page={active} />}

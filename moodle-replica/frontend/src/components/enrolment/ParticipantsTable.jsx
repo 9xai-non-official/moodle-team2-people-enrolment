@@ -24,7 +24,7 @@ const STATUS_TITLE = {
 
 const fmtAccess = (iso) => (iso ? new Date(iso).toLocaleDateString() : "never");
 
-export default function ParticipantsTable({ courseId, onOpenUser }) {
+export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) {
   const { setActingUserId } = useActingUser();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -87,13 +87,21 @@ export default function ParticipantsTable({ courseId, onOpenUser }) {
     {
       key: "status",
       label: "Status",
+      // clicking the badge answers "why this status?" — the paths drawer IS
+      // the explanation (per-path state + liveness + rollup)
       render: (r) => (
+        <span
+          style={{ cursor: "help" }}
+          title="why? click for this user's enrolment paths"
+          onClick={() => onOpenUser(r.user_id, r.full_name)}
+        >
         <Badge
           variant={STATUS_VARIANT[r.effective_status] || "neutral"}
           title={STATUS_TITLE[r.effective_status]}
         >
           {r.effective_status.replace(/_/g, " ")}
         </Badge>
+        </span>
       ),
     },
     {
@@ -102,7 +110,13 @@ export default function ParticipantsTable({ courseId, onOpenUser }) {
       render: (r) =>
         r.groups.length
           ? r.groups.map((g) => (
-              <span key={g.id} className="chip">
+              <span
+                key={g.id}
+                className="chip"
+                style={onNavigate ? { cursor: "pointer" } : undefined}
+                title="open the Groups page"
+                onClick={onNavigate ? () => onNavigate("Groups") : undefined}
+              >
                 {g.name}
               </span>
             ))
@@ -153,7 +167,11 @@ export default function ParticipantsTable({ courseId, onOpenUser }) {
               className="btn btn--danger"
               disabled={busy}
               onClick={() =>
-                mutate(apiDelete(`/api/enrolment/enrolments/${p.enrolment_id}`))
+                window.confirm(
+                  `Unenrol this ${p.method} path?\n\nIf it's their last path they ` +
+                  "leave the course roster — but their completion records survive " +
+                  "and progress resumes if they return (hard case #2).",
+                ) && mutate(apiDelete(`/api/enrolment/enrolments/${p.enrolment_id}`))
               }
             >
               Unenrol

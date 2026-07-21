@@ -6,6 +6,7 @@ import { fetchOverview } from "../lib/progressApi";
 import { useActingUser } from "../context/ActingUser";
 import Badge from "../components/common/Badge";
 import PageIntro from "../components/common/PageIntro";
+import FirstFiveMinutes from "../components/common/FirstFiveMinutes";
 import { PERSONAS, personaLabel } from "../lib/personas";
 
 const SECTIONS = ["Enrolment", "Roles", "Groups", "Progress"];
@@ -82,6 +83,8 @@ export default function DashboardPage({ onNavigate }) {
         Everything in this app depends on who you are — switch and watch pages
         change.
       </p>
+
+      <FirstFiveMinutes onNavigate={onNavigate} />
 
       <h2>My progress {actingUser && <small>— {actingUser.full_name}</small>}</h2>
       {overviewError && <div className="error-banner">{overviewError}</div>}
