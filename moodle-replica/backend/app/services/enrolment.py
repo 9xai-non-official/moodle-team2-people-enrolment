@@ -112,7 +112,12 @@ def _component(method_kind: str) -> str:
 
 
 async def _groups_call(fn: str, *args, **kwargs):
-    """Call Mahmoud's groups service if merged; otherwise skip loudly."""
+    """Call Mahmoud's groups service if merged; otherwise skip loudly.
+    His functions (PR #5) take no db argument — they use their own pool
+    connections — so they must ONLY run AFTER our transaction commits:
+    inside it they can't see our uncommitted enrolment rows (add_member's
+    active-enrolment guard would refuse) and their writes wouldn't roll
+    back with ours. Hence the deferred-ops pattern (_run_group_ops)."""
     if _groups is None or not hasattr(_groups, fn):
         log.warning("groups service unavailable — skipped %s(%s)", fn, args)
         return {"ok": False, "skipped": True,
@@ -121,6 +126,12 @@ async def _groups_call(fn: str, *args, **kwargs):
     if inspect.isawaitable(res):
         res = await res
     return res
+
+
+async def _run_group_ops(ops: list) -> list:
+    """Execute deferred group side-effects (after commit). Each op is
+    (fn_name, args_tuple, kwargs_dict); returns one result per op."""
+    return [await _groups_call(fn, *a, **kw) for fn, a, kw in ops]
 
 
 async def _course_context_id(dbx, course_id: int) -> int | None:
@@ -136,11 +147,25 @@ async def _method(dbx, method_id: int) -> dict | None:
 
 # ===========================================================================
 # The six frozen signatures (task 01 §3)
+#
+# Call-style compatibility: the frozen contract says (db, user_id, course_id),
+# but the codebase converged on module-level db with no argument (Mahmoud's
+# groups.py calls is_active_enrolled(user_id, course_id)). The read checks
+# teammates import accept BOTH styles: if the first argument is an int, it is
+# treated as user_id and the module pool is used.
 # ===========================================================================
 
-async def is_active_enrolled(db, user_id: int, course_id: int) -> bool:
+def _shift_db(db, a, b):
+    """(db, user, course) or (user, course) → always (dbx, user, course)."""
+    if isinstance(db, int):
+        return _dbmod, db, a
+    return db, a, b
+
+
+async def is_active_enrolled(db, user_id: int, course_id: int | None = None) -> bool:
     """The 4 conditions (§6.2); ANY path qualifies. Moodle onlyactive=True.
     Account suspension is deliberately NOT tested here (C-6)."""
+    db, user_id, course_id = _shift_db(db, user_id, course_id)
     row = await _one(db, f"""
         select 1
           from enrolment e
@@ -153,8 +178,9 @@ async def is_active_enrolled(db, user_id: int, course_id: int) -> bool:
     return row is not None
 
 
-async def is_enrolled(db, user_id: int, course_id: int) -> bool:
+async def is_enrolled(db, user_id: int, course_id: int | None = None) -> bool:
     """Bare existence, any state — Moodle's onlyactive=False (§6.2)."""
+    db, user_id, course_id = _shift_db(db, user_id, course_id)
     row = await _one(db, """
         select 1
           from enrolment e
@@ -165,8 +191,9 @@ async def is_enrolled(db, user_id: int, course_id: int) -> bool:
     return row is not None
 
 
-async def active_paths(db, user_id: int, course_id: int) -> list[dict]:
+async def active_paths(db, user_id: int, course_id: int | None = None) -> list[dict]:
     """Every path with its liveness verdict — feeds Khaled's checker evidence."""
+    db, user_id, course_id = _shift_db(db, user_id, course_id)
     rows = await _all(db, """
         select method_id, method as kind, enrolment_status as status,
                method_status, time_start, time_end,
@@ -184,10 +211,16 @@ async def enrol_user(db, method_id: int, user_id: int, *,
                      role_id: int | None = None,
                      time_start: datetime | None = None,
                      time_end: datetime | None = None,
-                     actor_id: int | None = None) -> dict:
+                     actor_id: int | None = None,
+                     _group_ops: list | None = None) -> dict:
     """Upsert the enrolment row, insert the provenance role row, and — for
     cohort methods with config.sync_group_id — place the user in the group
-    via Mahmoud's service (§6.5, D-1, rule 10: re-enrol updates, never errors)."""
+    via Mahmoud's service (§6.5, D-1, rule 10: re-enrol updates, never errors).
+
+    Group placement runs AFTER the transaction commits (see _groups_call).
+    Nested callers that hold the transaction (self_enrol, cohort sync) pass
+    their own _group_ops list and run it once their outer commit lands."""
+    ops: list = [] if _group_ops is None else _group_ops
     async with _tx(db) as conn:
         method = await _method(conn, method_id)
         if method is None:
@@ -236,18 +269,25 @@ async def enrol_user(db, method_id: int, user_id: int, *,
 
         sync_group_id = _cfg(method["config"]).get("sync_group_id")
         if method["method"] == "cohort" and sync_group_id:
-            result["group_added"] = await _groups_call(
-                "add_member", conn, sync_group_id, user_id,
-                component="enrol_cohort", item_id=method_id)
+            ops.append(("add_member", (sync_group_id, user_id),
+                        {"component": "enrol_cohort", "item_id": method_id}))
 
-        return result
+    if _group_ops is None:                    # top-level call: tx committed here
+        done = await _run_group_ops(ops)
+        result["group_added"] = done[0] if done else None
+    elif ops:
+        result["group_added"] = {"deferred": True}
+    return result
 
 
 async def unenrol_user(db, method_id: int, user_id: int, *,
-                       actor_id: int | None = None) -> dict:
+                       actor_id: int | None = None,
+                       _group_ops: list | None = None) -> dict:
     """Remove ONE path: its enrolment row + role rows matching MY
     component+item_id only, then the last-path check (§6.10 / Hard Case #2).
-    Completion rows are NEVER deleted — progress resumes on re-enrolment."""
+    Completion rows are NEVER deleted — progress resumes on re-enrolment.
+    Group deletions are deferred to after commit (see _groups_call)."""
+    ops: list = [] if _group_ops is None else _group_ops
     async with _tx(db) as conn:
         method = await _method(conn, method_id)
         if method is None:
@@ -274,13 +314,12 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             """, user_id, ctx, component, method_id)
 
         # This path's provenance-owned group memberships go with it.
-        groups_removed = await _groups_call(
-            "remove_members_by_provenance", conn, course_id, user_id,
-            component, method_id)
+        ops.append(("remove_members_by_provenance",
+                    (course_id, user_id, component, method_id), {}))
 
         result = {"ok": True, "course_id": course_id,
                   "roles_removed": [r["role_id"] for r in roles_removed],
-                  "groups_removed": groups_removed,
+                  "groups_removed": None,
                   "last_path_cleanup": False, "warnings": []}
 
         # ---- last-path check (§6.10): no other row → whole-course cleanup.
@@ -291,8 +330,7 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
         """, user_id, course_id)
         if still is None:
             result["last_path_cleanup"] = True
-            result["all_memberships_removed"] = await _groups_call(
-                "remove_all_memberships", conn, course_id, user_id)
+            ops.append(("remove_all_memberships", (course_id, user_id), {}))
             await _all(conn, """
                 delete from user_last_access
                  where user_id = $1 and course_id = $2 returning user_id
@@ -308,7 +346,15 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             # Deliberately NOT deleted: activity_completion / course_completion
             # rows (Hard Case #2), submissions, grades, and role_assignment
             # rows with component='' (Khaled's — never touch).
-        return result
+
+    if _group_ops is None:                    # top-level call: tx committed here
+        done = await _run_group_ops(ops)
+        result["groups_removed"] = done[0] if done else None
+        if result["last_path_cleanup"] and len(done) > 1:
+            result["all_memberships_removed"] = done[1]
+    elif ops:
+        result["groups_removed"] = {"deferred": True}
+    return result
 
 
 async def suspend(db, method_id: int, user_id: int) -> dict:
@@ -411,21 +457,25 @@ async def self_enrol(db, course_id: int, user_id: int,
         if not gate("key_match", key_ok, "wrong or missing enrolment key"):
             return verdict()
 
+        ops: list = []
         result = await enrol_user(
             conn, method["id"], user_id,
-            role_id=method["default_role_id"], actor_id=user_id)
+            role_id=method["default_role_id"], actor_id=user_id,
+            _group_ops=ops)
         if not result["ok"]:
             reasons.append(result["reason"])
             return verdict()
 
-        group_join = None
         if matched_group:
-            group_join = await _groups_call(
-                "add_member", conn, matched_group["id"], user_id,
-                component="enrol_self", item_id=method["id"])
+            ops.append(("add_member", (matched_group["id"], user_id),
+                        {"component": "enrol_self", "item_id": method["id"]}))
         await touch_last_access(conn, user_id, course_id)
-        return verdict(enrolled=True, method_id=method["id"],
-                       enrolment=result["enrolment"], group_joined=group_join)
+
+    # tx committed — group placement can now see the new enrolment row.
+    done = await _run_group_ops(ops)
+    return verdict(enrolled=True, method_id=method["id"],
+                   enrolment=result["enrolment"],
+                   group_joined=done[-1] if matched_group else None)
 
 
 # ===========================================================================
@@ -456,8 +506,11 @@ async def sync_cohort_method(db, method_id: int, *,
             method_id)}
 
         added, removed, kept = [], [], []
+        ops: list = []
+        sync_group_id = _cfg(method["config"]).get("sync_group_id")
         for uid in sorted(members - set(enrolled)):
-            await enrol_user(conn, method_id, uid, actor_id=actor_id)
+            await enrol_user(conn, method_id, uid, actor_id=actor_id,
+                             _group_ops=ops)
             added.append(uid)
         for uid in sorted(members & set(enrolled)):
             if enrolled[uid] == "suspended":
@@ -467,15 +520,17 @@ async def sync_cohort_method(db, method_id: int, *,
                 kept.append(uid)
             # groups_sync_with_enrolment equivalent: make sure the sync group
             # membership exists for current members.
-            sync_group_id = _cfg(method["config"]).get("sync_group_id")
             if sync_group_id:
-                await _groups_call("add_member", conn, sync_group_id, uid,
-                                   component="enrol_cohort", item_id=method_id)
+                ops.append(("add_member", (sync_group_id, uid),
+                            {"component": "enrol_cohort", "item_id": method_id}))
         for uid in sorted(set(enrolled) - members):
-            await unenrol_user(conn, method_id, uid, actor_id=actor_id)
+            await unenrol_user(conn, method_id, uid, actor_id=actor_id,
+                               _group_ops=ops)
             removed.append(uid)
 
-        return {"ok": True, "added": added, "removed": removed, "kept": kept}
+    # tx committed — run the accumulated group side-effects.
+    await _run_group_ops(ops)
+    return {"ok": True, "added": added, "removed": removed, "kept": kept}
 
 
 async def sync_methods_for_cohort(db, cohort_id: int, *,
@@ -557,6 +612,7 @@ async def delete_method(db, method_id: int, *,
     """Remove a method instance (frontend HC-1 demo path). Every enrolment
     through it is unenrolled via the normal per-path logic FIRST, so provenance
     role rows and last-path cleanup behave exactly as single unenrolments."""
+    ops: list = []
     async with _tx(db) as conn:
         method = await _method(conn, method_id)
         if method is None:
@@ -564,11 +620,13 @@ async def delete_method(db, method_id: int, *,
         users = await _all(
             conn, "select user_id from enrolment where method_id = $1", method_id)
         for u in users:
-            await unenrol_user(conn, method_id, u["user_id"], actor_id=actor_id)
+            await unenrol_user(conn, method_id, u["user_id"], actor_id=actor_id,
+                               _group_ops=ops)
         await _all(conn,
                    "delete from enrolment_method where id = $1 returning id",
                    method_id)
-        return {"ok": True, "unenrolled": [u["user_id"] for u in users]}
+    await _run_group_ops(ops)               # after commit
+    return {"ok": True, "unenrolled": [u["user_id"] for u in users]}
 
 
 async def guest_access_enabled(db, course_id: int) -> dict:
