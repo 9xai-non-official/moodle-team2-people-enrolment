@@ -2,7 +2,7 @@
 // capability sheet, role assignments, the permission checker (the demo
 // star), and the decision log. A log row can be replayed: it jumps to the
 // checker with the original inputs prefilled and re-runs them.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PageIntro from "../components/common/PageIntro";
 import Term from "../components/common/Term";
 import Tabs from "../components/common/Tabs";
@@ -11,11 +11,19 @@ import AssignRoleForm from "../components/roles/AssignRoleForm";
 import PermissionChecker from "../components/roles/PermissionChecker";
 import DecisionLog from "../components/roles/DecisionLog";
 
-const TABS = ["Roles", "Assignments", "Permission Checker", "Decision Log"];
+// Checker first: it's the demo star, so it's the default landing tab.
+const TABS = ["Permission Checker", "Roles", "Assignments", "Decision Log"];
 
 export default function RolesPage() {
-  const [tab, setTab] = useState(TABS[0]);
+  const [tab, setTab] = useState(() => {
+    const saved = localStorage.getItem("roles-tab");
+    return TABS.includes(saved) ? saved : TABS[0];
+  });
   const [replay, setReplay] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem("roles-tab", tab);
+  }, [tab]);
 
   function replayDecision(decision) {
     setReplay({ ...decision, nonce: (replay?.nonce ?? 0) + 1 });

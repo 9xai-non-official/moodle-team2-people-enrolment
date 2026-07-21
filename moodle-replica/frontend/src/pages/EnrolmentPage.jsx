@@ -58,8 +58,16 @@ function OtherUsersTab({ courseId }) {
 
 export default function EnrolmentPage({ onNavigate }) {
   const { courseId, setCourseId } = useSelectedCourse();
-  const [tab, setTab] = useState("Participants");
+  // remember the tab across visits this session (presentation state only)
+  const [tab, setTab] = useState(() => {
+    const saved = localStorage.getItem("enrol-tab");
+    return TABS.includes(saved) ? saved : "Participants";
+  });
   const [drawer, setDrawer] = useState(null); // { id, name }
+
+  useEffect(() => {
+    localStorage.setItem("enrol-tab", tab);
+  }, [tab]);
 
   return (
     <div>

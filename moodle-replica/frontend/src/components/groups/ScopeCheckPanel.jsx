@@ -73,7 +73,11 @@ export default function ScopeCheckPanel({ courseId }) {
   }
 
   return (
-    <div>
+    <div className="panel">
+      <div className="panel__title">Can I act on them?</div>
+      <p className="muted">
+        Action, not just sight: whether this actor may grade one specific target.
+      </p>
       <div className="form-row">
         <button
           className="btn"

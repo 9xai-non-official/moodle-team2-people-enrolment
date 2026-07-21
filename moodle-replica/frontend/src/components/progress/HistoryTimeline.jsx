@@ -16,6 +16,7 @@ export default function HistoryTimeline() {
   const [snaps, setSnaps] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [activeRange, setActiveRange] = useState("All time");
 
   function run(fromOverride) {
     setLoading(true);
@@ -46,9 +47,25 @@ export default function HistoryTimeline() {
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} includeDeleted autoSelectFirst={false} />
         <label>From</label>
-        <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <input
+          className="input"
+          type="date"
+          value={from}
+          onChange={(e) => {
+            setFrom(e.target.value);
+            setActiveRange(null);
+          }}
+        />
         <label>To</label>
-        <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        <input
+          className="input"
+          type="date"
+          value={to}
+          onChange={(e) => {
+            setTo(e.target.value);
+            setActiveRange(null);
+          }}
+        />
         <button className="btn btn--primary" onClick={() => run()}>
           Search
         </button>
@@ -61,12 +78,13 @@ export default function HistoryTimeline() {
         ].map((r) => (
           <button
             key={r.label}
-            className="btn"
+            className={`btn ${activeRange === r.label ? "btn--primary" : ""}`}
             onClick={() => {
               const f = r.years
                 ? new Date(Date.now() - r.years * 365 * 86400e3).toISOString().slice(0, 10)
                 : "";
               setFrom(f);
+              setActiveRange(r.label);
               run(f);
             }}
           >
@@ -90,17 +108,19 @@ export default function HistoryTimeline() {
       {!loading &&
         !error &&
         snaps &&
-        snaps.map((s) => (
-          <div className="panel" key={s.id}>
+        snaps.map((s, i) => (
+          <div className="panel progress-snap" key={s.id} style={{ "--i": Math.min(i, 8) }}>
             <div className="panel__title">
               {s.taken_at} ({(() => {
                 const y = (Date.now() - new Date(s.taken_at)) / (365 * 86400e3);
                 return y < 1 ? "this year" : `${Math.round(y)}y ago`;
               })()}) — {s.course.short_name}
               {s.course.deleted && (
-                <Badge variant="amber" title="served from snapshots">
-                  deleted — served from snapshots
-                </Badge>
+                <span className="progress-deleted-flag">
+                  <Badge variant="amber" title="served from snapshots">
+                    deleted — served from snapshots
+                  </Badge>
+                </span>
               )}
             </div>
             <div className="bar" style={{ maxWidth: "260px" }}>

@@ -5,7 +5,7 @@
 //
 // Every step fetches its own evidence fresh and logs the API calls it made —
 // the trail IS the proof. No client-side rules: every fact shown is a response.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiDelete, ApiError } from "../../api";
 import { cachedGet } from "../../lib/catalog";
 import { fetchOverview } from "../../lib/progressApi";
@@ -13,6 +13,8 @@ import UserSelect from "../common/UserSelect";
 import CourseSelect from "../common/CourseSelect";
 import ReasonList from "../common/ReasonList";
 import Badge from "../common/Badge";
+
+const STEP_ORDER = ["baseline", "dropped", "returned"];
 
 function ProgressBar({ percent }) {
   if (percent === null || percent === undefined)
@@ -68,7 +70,28 @@ export default function HC2DropReturn() {
   const [error, setError] = useState(null);
   const [reasons, setReasons] = useState(null);
 
+  const stepRef = useRef(null);
+  const primaryRef = useRef(null);
+  const mounted = useRef(false);
+
   const append = (line) => setLog((l) => [...l, line]);
+
+  // On each step change, bring the fresh step into view and land focus on its
+  // primary action (skip the first render so we never grab focus on load).
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    const reduce = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    )?.matches;
+    stepRef.current?.scrollIntoView({
+      behavior: reduce ? "auto" : "smooth",
+      block: "nearest",
+    });
+    primaryRef.current?.focus({ preventScroll: true });
+  }, [step]);
 
   // Default persona: resolve student.a by USERNAME — ids differ across DBs.
   useEffect(() => {
@@ -201,6 +224,7 @@ export default function HC2DropReturn() {
     participants && userId != null && participants.some((p) => p.user_id === userId);
   const sameNumbers =
     baselineRow && row && baselineRow.counted === row.counted && baselineRow.total === row.total;
+  const stepIdx = STEP_ORDER.indexOf(step);
 
   return (
     <div className="panel">
@@ -213,90 +237,113 @@ export default function HC2DropReturn() {
         you don&apos;t disturb other demos.
       </div>
 
-      <div className="form-row">
+      <fieldset className="form-row setup-fieldset" disabled={busy}>
         <label>Student</label>
         <UserSelect value={userId} onChange={setUserId} />
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} autoSelectFirst />
-      </div>
+      </fieldset>
 
       {!userId || !courseId ? (
         <p className="muted">Pick a student and a course to begin.</p>
       ) : (
         <>
-          <p className="muted">Step: {step}</p>
+          <div className="step-pills" aria-label="demo progress">
+            {STEP_ORDER.map((s, i) => (
+              <span
+                key={s}
+                className={`step-pill${i === stepIdx ? " step-pill--on" : ""}${
+                  i < stepIdx ? " step-pill--done" : ""
+                }`}
+              >
+                {s}
+              </span>
+            ))}
+          </div>
 
-          {step === "baseline" && (
-            <div className="grid-cards">
-              <div className="card">
-                <div className="card__title">Paths into this course</div>
-                <PathChips paths={paths} />
-              </div>
-              <div className="card">
-                <div className="card__title">Progress snapshot</div>
-                <RowStat row={row} />
-              </div>
-            </div>
-          )}
-
-          {step === "dropped" && (
-            <div className="grid-cards">
-              <div className="card">
-                <div className="card__title">Paths now (after drop)</div>
-                <PathChips paths={paths} />
-                <p className="muted">
-                  Still on the roster?{" "}
-                  <Badge variant={userStillListed ? "amber" : "grey"}>
-                    {userStillListed ? "listed" : "not listed"}
-                  </Badge>
-                </p>
-              </div>
-              <div className="card">
-                <div className="card__title">Progress row — survived</div>
-                <RowStat row={row} />
-                <p className="muted">
-                  before the drop:{" "}
-                  {baselineRow ? `${baselineRow.counted}/${baselineRow.total}` : "—"}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {step === "returned" && (
-            <>
-              <div className="verdict-banner verdict-banner--allowed">
-                Work survived the gap — completion is a fact about the past,
-                enrolment is a fact about the present.
-              </div>
+          <div className="step-panel" key={step} ref={stepRef}>
+            {step === "baseline" && (
               <div className="grid-cards">
                 <div className="card">
-                  <div className="card__title">Paths now (re-enrolled)</div>
+                  <div className="card__title">Paths into this course</div>
                   <PathChips paths={paths} />
                 </div>
                 <div className="card">
-                  <div className="card__title">Progress resumed</div>
+                  <div className="card__title">Progress snapshot</div>
+                  <RowStat row={row} />
+                </div>
+              </div>
+            )}
+
+            {step === "dropped" && (
+              <div className="grid-cards">
+                <div className="card">
+                  <div className="card__title">Paths now (after drop)</div>
+                  <PathChips paths={paths} />
+                  <p className="muted">
+                    Still on the roster?{" "}
+                    <Badge variant={userStillListed ? "amber" : "grey"}>
+                      {userStillListed ? "listed" : "not listed"}
+                    </Badge>
+                  </p>
+                </div>
+                <div className="card">
+                  <div className="card__title">Progress row — survived</div>
                   <RowStat row={row} />
                   <p className="muted">
-                    {sameNumbers
-                      ? "same numbers as before the drop — nothing recomputed from zero."
-                      : "compare against the baseline above."}
+                    before the drop:{" "}
+                    {baselineRow ? `${baselineRow.counted}/${baselineRow.total}` : "—"}
                   </p>
                 </div>
               </div>
-            </>
-          )}
+            )}
+
+            {step === "returned" && (
+              <>
+                <div className="verdict-banner verdict-banner--allowed">
+                  Work survived the gap — completion is a fact about the past,
+                  enrolment is a fact about the present.
+                </div>
+                <div className="grid-cards">
+                  <div className="card">
+                    <div className="card__title">Paths now (re-enrolled)</div>
+                    <PathChips paths={paths} />
+                  </div>
+                  <div className="card">
+                    <div className="card__title">Progress resumed</div>
+                    <RowStat row={row} />
+                    <p className="muted">
+                      {sameNumbers
+                        ? "same numbers as before the drop — nothing recomputed from zero."
+                        : "compare against the baseline above."}
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           {error && <div className="error-banner">{error}</div>}
           {reasons && <ReasonList reasons={reasons} tone="error" title="Refused" />}
 
           <div className="form-row">
             {step === "baseline" && (
-              <button className="btn btn--primary" disabled={busy} onClick={drop}>
+              <button
+                ref={primaryRef}
+                className="btn btn--primary"
+                disabled={busy}
+                onClick={drop}
+              >
                 Drop the student →
               </button>
             )}
             {step === "dropped" && (
-              <button className="btn btn--primary" disabled={busy} onClick={returnEnrol}>
+              <button
+                ref={primaryRef}
+                className="btn btn--primary"
+                disabled={busy}
+                onClick={returnEnrol}
+              >
                 Re-enrol (week 12) →
               </button>
             )}
@@ -311,7 +358,12 @@ export default function HC2DropReturn() {
             <div>
               <div className="panel__title">API trail</div>
               {log.map((line, i) => (
-                <div className="muted" key={i}>
+                <div
+                  className={`trail-line${
+                    i === log.length - 1 ? " trail-line--new" : ""
+                  }`}
+                  key={i}
+                >
                   {line}
                 </div>
               ))}

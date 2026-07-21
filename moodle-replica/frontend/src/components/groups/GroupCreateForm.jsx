@@ -6,6 +6,7 @@ import { createGroup } from "../../lib/groupsApi";
 import ReasonList from "../common/ReasonList";
 
 export default function GroupCreateForm({ courseId, onCreated }) {
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
   const [reasons, setReasons] = useState(null);
@@ -21,6 +22,7 @@ export default function GroupCreateForm({ courseId, onCreated }) {
       await createGroup(courseId, body);
       setName("");
       setKey("");
+      setOpen(false);
       onCreated();
     } catch (e) {
       setReasons(e.reasons?.length ? e.reasons : [e.message]);
@@ -29,8 +31,16 @@ export default function GroupCreateForm({ courseId, onCreated }) {
     }
   }
 
+  if (!open)
+    return (
+      <button className="btn" onClick={() => setOpen(true)}>
+        + New group
+      </button>
+    );
+
   return (
-    <div>
+    <div className="panel">
+      <div className="panel__title">New group</div>
       <div className="form-row">
         <input
           className="input"
@@ -46,6 +56,9 @@ export default function GroupCreateForm({ courseId, onCreated }) {
         />
         <button className="btn btn--primary" onClick={create} disabled={!name.trim() || busy}>
           {busy ? "Creating…" : "Create group"}
+        </button>
+        <button className="btn" onClick={() => setOpen(false)}>
+          Cancel
         </button>
       </div>
       {reasons && <ReasonList reasons={reasons} tone="error" title="Could not create group" />}
