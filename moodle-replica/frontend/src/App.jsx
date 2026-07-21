@@ -3,13 +3,22 @@ import { apiGet, USE_MOCKS } from "./api";
 import { ActingUserProvider, useActingUser } from "./context/ActingUser";
 import { SelectedCourseProvider } from "./context/SelectedCourse";
 import { PAGES, NAV_ITEMS } from "./pages";
+import WelcomeTour, { tourSeen } from "./components/common/WelcomeTour";
+import { personaBlurb, personaLabel } from "./lib/personas";
+import { SCRIPT } from "./lib/presenterScript";
 import "./App.css";
 
 function ActingUserSelect() {
   const { users, actingUser, setActingUserId, error } = useActingUser();
   if (error) return <span className="acting-user">users: {error}</span>;
   return (
-    <label className="acting-user">
+    <label
+      className="acting-user"
+      title={
+        personaBlurb(actingUser?.username) ??
+        "Everything you see and may do depends on who you are."
+      }
+    >
       Acting as
       <select
         className="select select--header"
@@ -18,7 +27,7 @@ function ActingUserSelect() {
       >
         {users.map((u) => (
           <option key={u.id} value={u.id}>
-            {u.full_name} ({u.username})
+            {u.full_name} — {personaLabel(u.username)}
           </option>
         ))}
       </select>
@@ -26,9 +35,77 @@ function ActingUserSelect() {
   );
 }
 
+function ActivityBar() {
+  const [busy, setBusy] = useState(0);
+  useEffect(() => {
+    const h = (e) => setBusy(e.detail);
+    window.addEventListener("api-activity", h);
+    return () => window.removeEventListener("api-activity", h);
+  }, []);
+  return busy > 0 ? <div className="activity-bar" /> : null;
+}
+
+function WriteToast() {
+  const [msg, setMsg] = useState(null);
+  useEffect(() => {
+    let timer;
+    const h = (e) => {
+      const { method, path } = e.detail;
+      const verb =
+        method === "DELETE" ? "Removed" : method === "PATCH" ? "Updated" : "Saved";
+      setMsg(`${verb} ✓ ${path.split("?")[0]}`);
+      clearTimeout(timer);
+      timer = setTimeout(() => setMsg(null), 2200);
+    };
+    window.addEventListener("api-write", h);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("api-write", h);
+    };
+  }, []);
+  return msg ? <div className="toast">{msg}</div> : null;
+}
+
+function PresenterCard({ page }) {
+  const steps = SCRIPT[page];
+  if (!steps) return null;
+  return (
+    <div className="presenter-card">
+      <div className="presenter-card__title">🎤 {page}</div>
+      <ol>
+        {steps.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function Shell() {
   const [active, setActive] = useState("Dashboard");
   const [health, setHealth] = useState("checking");
+  const [tourOpen, setTourOpen] = useState(() => !tourSeen());
+  const [presenter, setPresenter] = useState(
+    () => localStorage.getItem("presenter") === "1",
+  );
+
+  function togglePresenter() {
+    setPresenter((p) => {
+      localStorage.setItem("presenter", p ? "0" : "1");
+      return !p;
+    });
+  }
+
+  // Keyboard nav: 1..6 switch pages (ignored while typing in a field).
+  useEffect(() => {
+    function onKey(e) {
+      if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+      const idx = Number(e.key) - 1;
+      if (idx >= 0 && idx < NAV_ITEMS.length) setActive(NAV_ITEMS[idx]);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     apiGet("/api/health")
@@ -67,7 +144,25 @@ function Shell() {
         <div className={`api-status api-status--${health}`}>
           <span className="dot" /> API: {health}
         </div>
+        <button
+          className={`btn help-btn ${presenter ? "help-btn--on" : ""}`}
+          title="Presenter mode — pins the demo script for the current page"
+          onClick={togglePresenter}
+        >
+          🎤
+        </button>
+        <button
+          className="btn help-btn"
+          title="What is this app? (tour)"
+          onClick={() => setTourOpen(true)}
+        >
+          ?
+        </button>
       </header>
+      <WelcomeTour open={tourOpen} onClose={() => setTourOpen(false)} />
+      <ActivityBar />
+      <WriteToast />
+      {presenter && <PresenterCard page={active} />}
 
       <div className="app-body">
         <nav className="sidebar">

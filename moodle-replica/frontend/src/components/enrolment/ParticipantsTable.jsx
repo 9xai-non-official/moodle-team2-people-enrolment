@@ -204,7 +204,18 @@ export default function ParticipantsTable({ courseId, onOpenUser }) {
         loading={loading}
         error={loadError}
         rows={rows}
-        empty="No participants for this filter."
+        empty={
+          <span>
+            No participants for this filter — try{" "}
+            <button className="btn" onClick={() => setStatus("all")}>
+              show all statuses
+            </button>{" "}
+            or{" "}
+            <button className="btn btn--primary" onClick={() => setShowEnrol(true)}>
+              enrol someone
+            </button>
+          </span>
+        }
         rowKey={(r) => r.user_id}
         columns={columns}
       />

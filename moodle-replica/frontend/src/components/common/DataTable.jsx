@@ -22,13 +22,16 @@ export default function DataTable({
         </tr>
       </thead>
       <tbody>
-        {loading && (
-          <tr>
-            <td className="data-table__state" colSpan={columns.length}>
-              Loading…
-            </td>
-          </tr>
-        )}
+        {loading &&
+          [0, 1, 2].map((i) => (
+            <tr key={`sk${i}`} aria-hidden="true">
+              {columns.map((c) => (
+                <td key={c.key}>
+                  <span className="skeleton" />
+                </td>
+              ))}
+            </tr>
+          ))}
         {!loading && error && (
           <tr>
             <td

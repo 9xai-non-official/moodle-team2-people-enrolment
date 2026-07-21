@@ -12,10 +12,24 @@ import ContextPath from "../common/ContextPath";
 import Badge from "../common/Badge";
 import ReasonList from "../common/ReasonList";
 
+// Each gate gets a plain-words subtitle — a first-time viewer should read the
+// pipeline without knowing Moodle's vocabulary.
+const GATE_SUBTITLES = {
+  enrolment: "are they in this course?",
+  role: "do they hold a role here?",
+  capability: "does the role allow this action?",
+  group: "is the target within their group scope?",
+};
+
 function GatePipeline({ gates }) {
   return gates.map((g) => (
     <div key={g.gate} className={`gate-row gate-row--${g.passed ? "pass" : "fail"}`}>
-      <div className="gate-row__name">{g.gate}</div>
+      <div className="gate-row__name">
+        {g.gate}
+        <div className="muted" style={{ fontWeight: 400, fontSize: "0.75rem" }}>
+          {GATE_SUBTITLES[g.gate]}
+        </div>
+      </div>
       <div>
         {g.evidence.map((ev, i) => (
           <div key={i} className="gate-row__evidence">
@@ -25,6 +39,27 @@ function GatePipeline({ gates }) {
       </div>
     </div>
   ));
+}
+
+// One human sentence summarizing the machine verdict — pure presentation of
+// the gates the API returned, no rule logic of its own.
+function plainVerdict(result, actorName) {
+  const who = actorName || "This user";
+  const failed = result.gates.filter((g) => !g.passed);
+  if (failed.length === 0) return `${who} may do this here — every gate passed.`;
+  const capPassed = result.gates.find((g) => g.gate === "capability")?.passed;
+  const groupFail = failed.find((g) => g.gate === "group");
+  if (capPassed && groupFail) {
+    return (
+      `${who}'s role ALLOWS this action — but not on this target: ` +
+      `${groupFail.evidence[0] ?? "outside their group scope"}. ` +
+      `Allowed in general, blocked for THIS person. That contrast is the story.`
+    );
+  }
+  const first = failed[0];
+  return `Blocked at the "${first.gate}" gate (${GATE_SUBTITLES[first.gate] ?? ""}): ${
+    first.evidence[0] ?? "no evidence line"
+  }`;
 }
 
 export default function PermissionChecker({ replay }) {
@@ -231,6 +266,12 @@ export default function PermissionChecker({ replay }) {
           <div className={`verdict-banner verdict-banner--${result.verdict}`}>
             {result.verdict.toUpperCase()}
           </div>
+          <p>
+            {plainVerdict(
+              result,
+              users.find((u) => u.id === Number(actorId))?.full_name,
+            )}
+          </p>
 
           <div className="panel__title">Gate pipeline</div>
           <GatePipeline gates={result.gates} />
