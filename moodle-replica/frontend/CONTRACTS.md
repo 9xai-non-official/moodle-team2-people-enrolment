@@ -86,12 +86,22 @@ Conventions everywhere:
     rows:[{user_id, full_name,
            cells:[{activity_id, state:"incomplete"|"complete"|"complete_pass"|"complete_fail",
                    overridden_by:{id,full_name}|null, viewed:bool}],
-           course_complete:{done:bool, at:date|null}}]}`
+           course_complete:{done:bool, at:date|null}}],
+    can_override:bool, cannot_override_reason:string|null}`
+  (`can_override` = actor passes completion:override, decided SERVER-side; the UI
+  pre-disables the Override button with the reason as tooltip, and the POST 403s
+  with the same reason — spec §4.5 "disable with the reason as tooltip".)
 - `GET /api/progress/courses/{id}/percent?user_id=` → `{percent:number|null, counted, total, excluded}`
-  (`percent:null` when the course has no criteria — renders NO bar.)
+  (`percent:null` when the course has no criteria — renders NO bar. Defined for
+  parity; the UI currently consumes `overview`, which carries the same numbers.)
 - `GET /api/progress/users/{id}/overview` →
-  `[{course:{id, short_name, deleted}, percent:number|null, counted, total, excluded, completed_at}]`
-  (includes deleted courses, served from snapshots.)
+  `[{course:{id, short_name, deleted}, percent:number|null, counted, total, excluded,
+     completed_at, has_self_criterion:bool}]`
+  (includes deleted courses, served from snapshots; `has_self_criterion` drives
+  the "Complete course" button.)
+  Note the deliberate Moodle contradiction the UI surfaces: a hidden activity's
+  criterion is EXCLUDED from the dashboard percent denominator but still counted
+  by ALL-aggregation — so a user can read 100% while not course-complete.
 - `GET /api/progress/courses/{id}/criteria` → `{aggregation:"all"|"any", items:[{id, kind, activity_id, label, threshold?}]}`
 - `POST /api/progress/courses/{id}/criteria` body `{kind, activity_id?, threshold?, aggregation?}` → updated criteria
 - `POST /api/progress/activities/{id}/view` body `{user_id}` → cell
