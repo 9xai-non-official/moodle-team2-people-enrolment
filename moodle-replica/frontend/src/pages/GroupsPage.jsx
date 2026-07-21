@@ -8,6 +8,7 @@ import Tabs from "../components/common/Tabs";
 import GroupsBoard from "../components/groups/GroupsBoard";
 import GroupingPanel from "../components/groups/GroupingPanel";
 import ActivityPolicyTable from "../components/groups/ActivityPolicyTable";
+import AllowedGroupsPanel from "../components/groups/AllowedGroupsPanel";
 import ScopeCheckPanel from "../components/groups/ScopeCheckPanel";
 
 const TABS = ["Groups", "Groupings", "Activity policy", "Scope check"];
@@ -32,7 +33,12 @@ export default function GroupsPage() {
           {tab === "Groups" && <GroupsBoard courseId={courseId} />}
           {tab === "Groupings" && <GroupingPanel courseId={courseId} />}
           {tab === "Activity policy" && <ActivityPolicyTable courseId={courseId} />}
-          {tab === "Scope check" && <ScopeCheckPanel courseId={courseId} />}
+          {tab === "Scope check" && (
+            <>
+              <AllowedGroupsPanel courseId={courseId} />
+              <ScopeCheckPanel courseId={courseId} />
+            </>
+          )}
         </>
       )}
     </div>

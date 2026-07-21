@@ -22,6 +22,8 @@ const cohortById = (id) => COHORTS.find((c) => c.id === id) || null;
 const nextEnrolmentId = () => Math.max(0, ...ENROLMENTS.map((e) => e.id)) + 1;
 const nextAssignmentId = () =>
   Math.max(0, ...ROLE_ASSIGNMENTS.map((r) => r.id)) + 1;
+const nextMethodId = () => Math.max(0, ...METHODS.map((m) => m.id)) + 1;
+const nextCohortId = () => Math.max(0, ...COHORTS.map((c) => c.id)) + 1;
 
 // short_names of a user's role assignments at the course context (deduped).
 const rolesOfUserAtCourse = (userId, courseId) => {
@@ -136,6 +138,53 @@ export const routes = [
     handler: (m) => {
       const courseId = Number(m[1]);
       return METHODS.filter((mm) => mm.course_id === courseId).map(mapMethod);
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/enrolment\/courses\/(\d+)\/methods$/,
+    handler: (m, body) => {
+      const courseId = Number(m[1]);
+      const b = body || {};
+      if (b.method === "cohort" && !b.cohort_id)
+        throw new ApiError(422, {
+          detail: "cohort_id required for cohort method",
+        });
+      const created = {
+        id: nextMethodId(),
+        course_id: courseId,
+        method: b.method,
+        status: b.status || "enabled",
+        default_role_id: b.default_role_id ?? null,
+        cohort_id: b.method === "cohort" ? b.cohort_id : null,
+        config: b.config || {},
+      };
+      METHODS.push(created);
+      return mapMethod(created);
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/enrolment\/guest-preview\/(\d+)$/,
+    handler: (m) => {
+      const courseId = Number(m[1]);
+      const guest = METHODS.find(
+        (mm) => mm.course_id === courseId && mm.method === "guest",
+      );
+      if (!guest)
+        return {
+          guest_access: false,
+          method_id: null,
+          has_password: false,
+          reason: "no guest method instance in this course",
+        };
+      return {
+        guest_access: guest.status === "enabled",
+        method_id: guest.id,
+        has_password: !!guest.config?.password,
+        reason:
+          guest.status === "enabled" ? null : "guest method instance is disabled",
+      };
     },
   },
   {
@@ -291,6 +340,32 @@ export const routes = [
     },
   },
   {
+    // Per-path unenrol, Yaman's canonical form (HC-2 stepper uses it).
+    // Removes the enrolment row + ITS provenance role_assignment only;
+    // completion rows are never touched — that IS hard case #2.
+    method: "DELETE",
+    pattern: /^\/api\/enrolment\/methods\/(\d+)\/enrolments\/(\d+)$/,
+    handler: (m) => {
+      const methodId = Number(m[1]);
+      const userId = Number(m[2]);
+      const i = ENROLMENTS.findIndex(
+        (x) => x.method_id === methodId && x.user_id === userId,
+      );
+      if (i < 0)
+        throw new ApiError(404, {
+          detail: `user ${userId} has no enrolment via method ${methodId}`,
+        });
+      ENROLMENTS.splice(i, 1);
+      for (let r = ROLE_ASSIGNMENTS.length - 1; r >= 0; r--) {
+        const ra = ROLE_ASSIGNMENTS[r];
+        if (ra.user_id === userId && ra.item_id === methodId) {
+          ROLE_ASSIGNMENTS.splice(r, 1);
+        }
+      }
+      return null; // 204
+    },
+  },
+  {
     method: "DELETE",
     pattern: /^\/api\/enrolment\/methods\/(\d+)$/,
     handler: (m) => {
@@ -400,6 +475,8 @@ export const routes = [
                 deleted: course.deleted,
               }
             : null,
+          enrolment_id: e.id,
+          method_id: e.method_id,
           method: method?.method,
           method_status: method?.status,
           status: e.status,
@@ -434,6 +511,112 @@ export const routes = [
         const u = userById(id);
         return { user_id: id, username: u?.username, full_name: u?.full_name };
       });
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/enrolment\/cohorts$/,
+    handler: (m, body) => {
+      const b = body || {};
+      if (!b.name) throw new ApiError(422, { detail: "name is required" });
+      const created = {
+        id: nextCohortId(),
+        name: b.name,
+        id_number: b.id_number || null,
+        member_ids: [],
+      };
+      COHORTS.push(created);
+      return {
+        id: created.id,
+        name: created.name,
+        id_number: created.id_number,
+        member_count: 0,
+        synced_courses: [],
+      };
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/enrolment\/cohorts\/(\d+)\/members$/,
+    handler: (m, body) => {
+      const cohort = cohortById(Number(m[1]));
+      if (!cohort) throw new ApiError(404, { detail: `cohort ${m[1]} not found` });
+      const b = body || {};
+      if (!b.user_id) throw new ApiError(422, { detail: "user_id is required" });
+      if (!cohort.member_ids.includes(b.user_id))
+        cohort.member_ids.push(b.user_id);
+      // Cohort sync side effect: enrol the user into every course whose cohort
+      // method points here, adding the enrol_cohort provenance role row — this
+      // is how salma gets her HC-1 second path.
+      const synced = [];
+      for (const method of METHODS.filter((mm) => mm.cohort_id === cohort.id)) {
+        if (
+          !ENROLMENTS.some(
+            (e) => e.method_id === method.id && e.user_id === b.user_id,
+          )
+        )
+          ENROLMENTS.push({
+            id: nextEnrolmentId(),
+            method_id: method.id,
+            user_id: b.user_id,
+            status: "active",
+            time_start: null,
+            time_end: null,
+          });
+        const ctx = contextForCourse(method.course_id);
+        if (
+          ctx &&
+          !ROLE_ASSIGNMENTS.some(
+            (ra) =>
+              ra.user_id === b.user_id &&
+              ra.context_id === ctx.id &&
+              ra.component === "enrol_cohort" &&
+              ra.item_id === method.id,
+          )
+        )
+          ROLE_ASSIGNMENTS.push({
+            id: nextAssignmentId(),
+            user_id: b.user_id,
+            role_id: method.default_role_id,
+            context_id: ctx.id,
+            component: "enrol_cohort",
+            item_id: method.id,
+          });
+        const short = courseById(method.course_id)?.short_name;
+        if (short && !synced.includes(short)) synced.push(short);
+      }
+      return { added: [b.user_id], synced_courses: synced };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/enrolment\/cohorts\/(\d+)\/members\/(\d+)$/,
+    handler: (m) => {
+      const cohort = cohortById(Number(m[1]));
+      if (!cohort) throw new ApiError(404, { detail: `cohort ${m[1]} not found` });
+      const userId = Number(m[2]);
+      const i = cohort.member_ids.indexOf(userId);
+      if (i >= 0) cohort.member_ids.splice(i, 1);
+      // Policy UNENROL: drop this user's enrolments + enrol_cohort role rows for
+      // every cohort method pointing here — mirrors the DELETE method handler,
+      // and leaves any other path (e.g. salma's manual row) untouched (HC-1).
+      const methodIds = new Set(
+        METHODS.filter((mm) => mm.cohort_id === cohort.id).map((mm) => mm.id),
+      );
+      for (let j = ENROLMENTS.length - 1; j >= 0; j--)
+        if (
+          methodIds.has(ENROLMENTS[j].method_id) &&
+          ENROLMENTS[j].user_id === userId
+        )
+          ENROLMENTS.splice(j, 1);
+      for (let j = ROLE_ASSIGNMENTS.length - 1; j >= 0; j--)
+        if (
+          ROLE_ASSIGNMENTS[j].component === "enrol_cohort" &&
+          methodIds.has(ROLE_ASSIGNMENTS[j].item_id) &&
+          ROLE_ASSIGNMENTS[j].user_id === userId
+        )
+          ROLE_ASSIGNMENTS.splice(j, 1);
+      return null; // 204
     },
   },
 ];

@@ -236,8 +236,10 @@ async def enrol_user(db, method_id: int, user_id: int, *,
 
         sync_group_id = _cfg(method["config"]).get("sync_group_id")
         if method["method"] == "cohort" and sync_group_id:
+            # Mahmoud's service manages its own db access — no conn arg
+            # (arity mismatch here 500'd every cohort enrol; found live).
             result["group_added"] = await _groups_call(
-                "add_member", conn, sync_group_id, user_id,
+                "add_member", sync_group_id, user_id,
                 component="enrol_cohort", item_id=method_id)
 
         return result
@@ -274,8 +276,9 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             """, user_id, ctx, component, method_id)
 
         # This path's provenance-owned group memberships go with it.
+        # (No conn arg — Mahmoud's service manages its own db access.)
         groups_removed = await _groups_call(
-            "remove_members_by_provenance", conn, course_id, user_id,
+            "remove_members_by_provenance", course_id, user_id,
             component, method_id)
 
         result = {"ok": True, "course_id": course_id,
@@ -292,7 +295,7 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
         if still is None:
             result["last_path_cleanup"] = True
             result["all_memberships_removed"] = await _groups_call(
-                "remove_all_memberships", conn, course_id, user_id)
+                "remove_all_memberships", course_id, user_id)
             await _all(conn, """
                 delete from user_last_access
                  where user_id = $1 and course_id = $2 returning user_id
@@ -421,7 +424,7 @@ async def self_enrol(db, course_id: int, user_id: int,
         group_join = None
         if matched_group:
             group_join = await _groups_call(
-                "add_member", conn, matched_group["id"], user_id,
+                "add_member", matched_group["id"], user_id,
                 component="enrol_self", item_id=method["id"])
         await touch_last_access(conn, user_id, course_id)
         return verdict(enrolled=True, method_id=method["id"],
@@ -469,7 +472,7 @@ async def sync_cohort_method(db, method_id: int, *,
             # membership exists for current members.
             sync_group_id = _cfg(method["config"]).get("sync_group_id")
             if sync_group_id:
-                await _groups_call("add_member", conn, sync_group_id, uid,
+                await _groups_call("add_member", sync_group_id, uid,
                                    component="enrol_cohort", item_id=method_id)
         for uid in sorted(set(enrolled) - members):
             await unenrol_user(conn, method_id, uid, actor_id=actor_id)

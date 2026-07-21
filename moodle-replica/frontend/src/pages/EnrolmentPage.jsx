@@ -10,83 +10,11 @@ import Tabs from "../components/common/Tabs";
 import DataTable from "../components/common/DataTable";
 import ParticipantsTable from "../components/enrolment/ParticipantsTable";
 import MethodsPanel from "../components/enrolment/MethodsPanel";
+import CohortManager from "../components/enrolment/CohortManager";
 import SelfEnrolDemo from "../components/enrolment/SelfEnrolDemo";
 import UserPathsDrawer from "../components/enrolment/UserPathsDrawer";
 
 const TABS = ["Participants", "Methods", "Cohorts", "Other users", "Self-enrol demo"];
-
-function CohortsTab() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [open, setOpen] = useState(null); // cohort id whose members are shown
-  const [members, setMembers] = useState([]);
-  const [membersError, setMembersError] = useState(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    apiGet("/api/enrolment/cohorts")
-      .then(setRows)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  function toggleMembers(cohort) {
-    if (open === cohort.id) {
-      setOpen(null);
-      return;
-    }
-    setOpen(cohort.id);
-    setMembers([]);
-    setMembersError(null);
-    apiGet(`/api/enrolment/cohorts/${cohort.id}/members`)
-      .then(setMembers)
-      .catch((e) => setMembersError(e.message));
-  }
-
-  return (
-    <div>
-      <DataTable
-        loading={loading}
-        error={error}
-        rows={rows}
-        empty="No cohorts."
-        columns={[
-          { key: "name", label: "Cohort" },
-          { key: "id_number", label: "ID number" },
-          {
-            key: "member_count",
-            label: "Members",
-            render: (r) => (
-              <button className="btn" onClick={() => toggleMembers(r)}>
-                {r.member_count} {open === r.id ? "▴" : "▾"}
-              </button>
-            ),
-          },
-          {
-            key: "synced_courses",
-            label: "Synced courses",
-            render: (r) =>
-              r.synced_courses.length ? r.synced_courses.join(", ") : "—",
-          },
-        ]}
-      />
-      {open !== null && (
-        <div className="panel">
-          <div className="panel__title">Cohort members</div>
-          {membersError && <div className="error-banner">{membersError}</div>}
-          {!membersError && members.length === 0 && <span className="muted">loading…</span>}
-          {members.map((m) => (
-            <span className="chip" key={m.user_id}>
-              {m.full_name} <span className="muted">({m.username})</span>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function OtherUsersTab({ courseId }) {
   const [rows, setRows] = useState([]);
@@ -152,7 +80,7 @@ export default function EnrolmentPage() {
             />
           )}
           {tab === "Methods" && <MethodsPanel courseId={courseId} />}
-          {tab === "Cohorts" && <CohortsTab />}
+          {tab === "Cohorts" && <CohortManager />}
           {tab === "Other users" && <OtherUsersTab courseId={courseId} />}
           {tab === "Self-enrol demo" && <SelfEnrolDemo courseId={courseId} />}
         </>

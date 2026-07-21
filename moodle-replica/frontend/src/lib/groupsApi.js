@@ -8,7 +8,7 @@
 //   his POST /api/groups/access-check {actor_user_id,…} →
 //        {visible, action_allowed, …} mapped to the contract's
 //        {outcome: allowed|denied|invisible, reasons}.
-import { apiGet, apiPost } from "../api";
+import { apiGet, apiPost, apiPatch, apiDelete } from "../api";
 
 const is404 = (e) => e.status === 404;
 
@@ -98,4 +98,47 @@ export async function accessCheck({ actor_id, target_user_id, activity_id }) {
   });
   const outcome = !v.visible ? "invisible" : v.action_allowed ? "allowed" : "denied";
   return { outcome, reasons: v.reasons ?? [] };
+}
+
+export async function createGroup(courseId, body) {
+  try {
+    return await apiPost(`/api/groups/courses/${courseId}/groups`, body);
+  } catch (e) {
+    if (!is404(e)) throw e;
+  }
+  return apiPost("/api/groups", { course_id: courseId, ...body });
+}
+
+// Same path in both worlds; removes group + memberships only (GRP-001).
+export function deleteGroup(groupId) {
+  return apiDelete(`/api/groups/${groupId}`);
+}
+
+// null is meaningful (= inherit course / no grouping); omit a key to keep it.
+// Same path live and mock. Caller refetches, so the returned policy is unused.
+export function patchActivityPolicy(activityId, changes) {
+  return apiPatch(`/api/groups/activities/${activityId}`, changes);
+}
+
+// Defensive: the live shape is unconfirmed — accept the group list, the
+// all-groups flag, and the reason under whatever key/type they arrive in.
+function normalizeAllowed(raw) {
+  const list = raw.groups ?? raw.allowed_groups ?? [];
+  const groups = list.map((g) =>
+    typeof g === "string" ? { name: g } : { id: g.id, name: g.name ?? g.group_name ?? `#${g.id}` },
+  );
+  const all = raw.all_groups ?? raw.access_all_groups ?? raw.accessallgroups ?? false;
+  const reason =
+    raw.reason ?? (Array.isArray(raw.reasons) ? raw.reasons.join(" · ") : raw.reasons ?? null);
+  return { groups, all_groups: !!all, reason };
+}
+
+export async function fetchAllowedGroups(activityId, actorId) {
+  const base = `/api/groups/activities/${activityId}/allowed`;
+  try {
+    return normalizeAllowed(await apiGet(`${base}?actor_id=${actorId}`));
+  } catch (e) {
+    if (!is404(e) && e.status !== 422) throw e;
+  }
+  return normalizeAllowed(await apiGet(`${base}?user_id=${actorId}`));
 }
