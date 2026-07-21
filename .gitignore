@@ -10,6 +10,7 @@ build/
 .env.*.local
 .DS_Store
 *.log
+.gstack/
 
 # Secrets must never be committed. Real values live in a local .env (see .env.example)
 # or are shared via a private channel — not in the repo.
