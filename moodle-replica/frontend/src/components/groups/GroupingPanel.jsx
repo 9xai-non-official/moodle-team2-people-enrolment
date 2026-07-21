@@ -1,7 +1,7 @@
 // Groupings are sets of groups (never users) — the banner states it because it
 // is the thing everyone gets wrong. One .panel per grouping, group chips inside.
 import { useEffect, useState } from "react";
-import { apiGet } from "../../api";
+import { fetchGroupings } from "../../lib/groupsApi";
 
 export default function GroupingPanel({ courseId }) {
   const [groupings, setGroupings] = useState([]);
@@ -11,7 +11,7 @@ export default function GroupingPanel({ courseId }) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    apiGet(`/api/groups/courses/${courseId}/groupings`)
+    fetchGroupings(courseId)
       .then(setGroupings)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

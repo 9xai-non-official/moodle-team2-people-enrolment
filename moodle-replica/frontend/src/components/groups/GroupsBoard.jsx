@@ -3,7 +3,8 @@
 // 409 machine-owned) render verbatim; machine-owned rows get a Force remove.
 // No optimistic UI — every successful mutation refetches.
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost, apiDelete } from "../../api";
+import { apiPost, apiDelete } from "../../api";
+import { fetchGroupsBoard } from "../../lib/groupsApi";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import UserSelect from "../common/UserSelect";
@@ -27,7 +28,7 @@ export default function GroupsBoard({ courseId }) {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    apiGet(`/api/groups/courses/${courseId}/groups`)
+    fetchGroupsBoard(courseId)
       .then(setGroups)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
