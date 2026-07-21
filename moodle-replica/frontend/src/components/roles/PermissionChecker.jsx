@@ -62,6 +62,39 @@ function plainVerdict(result, actorName) {
   }`;
 }
 
+// First gate whose pass/fail differs between two results, matched by gate name
+// (not index) so it survives any ordering. Powers the compare contrast line.
+function firstDivergentGate(ra, rb) {
+  return ra.gates.find((ga) => {
+    const gb = rb.gates.find((x) => x.gate === ga.gate);
+    return gb && ga.passed !== gb.passed;
+  })?.gate;
+}
+
+// One compare column: actor header, then loading / error / full verdict —
+// reusing GatePipeline + plainVerdict so both sides read identically to the
+// single check above. `col` is {result} or {error}, undefined while loading.
+function CompareColumn({ name, col, loading }) {
+  return (
+    <div>
+      <div className="panel__title">{name}</div>
+      {loading ? (
+        <div className="muted">checking…</div>
+      ) : col?.error ? (
+        <div className="error-banner">{col.error}</div>
+      ) : col?.result ? (
+        <>
+          <div className={`verdict-banner verdict-banner--${col.result.verdict}`}>
+            {col.result.verdict.toUpperCase()}
+          </div>
+          <GatePipeline gates={col.result.gates} />
+          <p>{plainVerdict(col.result, col.name)}</p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export default function PermissionChecker({ replay }) {
   const { actingUser } = useActingUser();
   const [capabilities, setCapabilities] = useState([]);
@@ -78,6 +111,10 @@ export default function PermissionChecker({ replay }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [compareA, setCompareA] = useState(null);
+  const [compareB, setCompareB] = useState(null);
+  const [compareResult, setCompareResult] = useState(null);
+  const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -93,6 +130,8 @@ export default function PermissionChecker({ replay }) {
         setUsers(us);
         if (caps.length) setCapability((cur) => cur ?? caps[0]);
         if (ctxs.length) setContextId((cur) => cur ?? ctxs[0].id);
+        setCompareA((cur) => cur ?? us.find((u) => u.username === "ta.a")?.id ?? null);
+        setCompareB((cur) => cur ?? us.find((u) => u.username === "ta.allgroups")?.id ?? null);
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -134,7 +173,36 @@ export default function PermissionChecker({ replay }) {
       .finally(() => setSubmitting(false));
   }
 
+  // Two checks, same question, different actor. Each call resolves to its own
+  // {result} or {error} so one column failing never blanks the other. Shared
+  // fields mirror submit()'s body; simulate_role is left out on purpose — the
+  // point is contrasting two real personas' own roles.
+  function runCompare() {
+    setComparing(true);
+    setCompareResult(null);
+    const shared = {
+      capability,
+      context_id: contextId,
+      target_user_id: targetUserId || undefined,
+      activity_id: activityId || undefined,
+    };
+    const nameFor = (id) => users.find((u) => u.id === id)?.full_name ?? "—";
+    const call = (id) =>
+      apiPost("/api/permissions/check", { actor_id: id, ...shared })
+        .then((result) => ({ result }))
+        .catch((e) => ({ error: e.message }));
+    Promise.all([call(compareA), call(compareB)]).then(([a, b]) => {
+      setCompareResult({
+        a: { name: nameFor(compareA), ...a },
+        b: { name: nameFor(compareB), ...b },
+      });
+      setComparing(false);
+    });
+  }
+
   const activityContexts = contexts.filter((c) => c.level === "activity");
+  const nameA = users.find((u) => u.id === compareA)?.full_name ?? "Actor A";
+  const nameB = users.find((u) => u.id === compareB)?.full_name ?? "Actor B";
 
   // One-click hard-case walkthroughs. Resolved by username / context label so
   // they work in mock AND real-DB mode (ids differ between the two worlds).
@@ -299,6 +367,45 @@ export default function PermissionChecker({ replay }) {
             tone={result.verdict === "allowed" ? "ok" : "error"}
             title="Reasons"
           />
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="panel__title">Compare personas — side by side</div>
+        <div className="form-row">
+          <label>Compare:</label>
+          <UserSelect value={compareA} onChange={setCompareA} ariaLabel="Compare actor A" />
+          <span>vs</span>
+          <UserSelect value={compareB} onChange={setCompareB} ariaLabel="Compare actor B" />
+          <button
+            className="btn btn--primary"
+            onClick={runCompare}
+            disabled={!compareA || !compareB || !capability || !contextId || comparing}
+          >
+            {comparing ? "Checking…" : "Run both"}
+          </button>
+        </div>
+        <div className="muted">uses the capability/context/target chosen above</div>
+      </div>
+
+      {(comparing || compareResult) && (
+        <div className="panel">
+          <div className="panel__title">Side-by-side result</div>
+          {!comparing &&
+            compareResult?.a?.result &&
+            compareResult?.b?.result &&
+            compareResult.a.result.verdict !== compareResult.b.result.verdict && (
+              <div className="banner-info">
+                Same question, different person: {compareResult.a.name} is{" "}
+                {compareResult.a.result.verdict}, {compareResult.b.name} is{" "}
+                {compareResult.b.result.verdict} — the difference is the{" "}
+                {firstDivergentGate(compareResult.a.result, compareResult.b.result)} gate.
+              </div>
+            )}
+          <div className="compare-grid">
+            <CompareColumn name={compareResult?.a?.name ?? nameA} col={compareResult?.a} loading={comparing} />
+            <CompareColumn name={compareResult?.b?.name ?? nameB} col={compareResult?.b} loading={comparing} />
+          </div>
         </div>
       )}
     </div>

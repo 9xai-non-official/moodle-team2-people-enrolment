@@ -56,7 +56,7 @@ function OtherUsersTab({ courseId }) {
   );
 }
 
-export default function EnrolmentPage() {
+export default function EnrolmentPage({ onNavigate }) {
   const { courseId, setCourseId } = useSelectedCourse();
   const [tab, setTab] = useState("Participants");
   const [drawer, setDrawer] = useState(null); // { id, name }
@@ -83,6 +83,7 @@ export default function EnrolmentPage() {
             <ParticipantsTable
               courseId={courseId}
               onOpenUser={(id, name) => setDrawer({ id, name })}
+              onNavigate={onNavigate}
             />
           )}
           {tab === "Methods" && <MethodsPanel courseId={courseId} />}

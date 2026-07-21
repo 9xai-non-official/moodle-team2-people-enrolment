@@ -99,7 +99,11 @@ export default function MethodsPanel({ courseId }) {
                 className="btn btn--danger"
                 disabled={busy}
                 onClick={() =>
-                  run(apiDelete(`/api/enrolment/methods/${m.id}`))
+                  window.confirm(
+                    `Remove the ${m.method} method?\n\nEveryone enrolled ONLY via this ` +
+                    "method leaves the course (their completion records survive). " +
+                    "People with another path stay enrolled — that's hard case #1.",
+                  ) && run(apiDelete(`/api/enrolment/methods/${m.id}`))
                 }
               >
                 Remove method

@@ -20,6 +20,12 @@
   font-weight: 700;
   letter-spacing: 0.2px;
 }
+.brand__sub {
+  font-weight: 400;
+  font-size: 0.78rem;
+  opacity: 0.75;
+  margin-left: 0.5rem;
+}
 
 .api-status {
   display: flex;
@@ -466,6 +472,10 @@ tr.row--highlight { background: #fef7e0; }
     background-size: 200% 100%;
   }
   .card, .panel, .modal-panel, .drawer { background: #1f2327; border-color: #33383d; }
+  /* modal + drawer hardcode a light-mode text color — override it or the
+     tour renders dark-on-dark (user-reported, screenshot-verified) */
+  .modal-panel, .drawer { color: #e8eaed; }
+  .modal-head, .modal-foot { border-color: #33383d; }
   .card--link:hover, .data-table__row--clickable:hover { background: #262c33; }
   .select, .input, .btn { background: #23272b; color: #e8eaed; border-color: #3c4348; }
   .btn:hover:not(:disabled) { background: #2d3237; }
@@ -474,9 +484,110 @@ tr.row--highlight { background: #fef7e0; }
   .gate-row { background: #23272b; }
   .bar { background: #2d3237; }
   .bar__label { color: #e8eaed; }
-  .muted, .card__label, .data-table th { color: #9aa0a6; }
+  .muted, .card__label, .data-table th, .form-row label,
+  .gate-row__evidence, .page-intro, .reason-list__evidence { color: #9aa0a6; }
   .data-table th, .data-table td { border-bottom-color: #33383d; }
   .tabs { border-bottom-color: #33383d; }
   tr.row--highlight { background: #3a3420; }
   .modal-close, .drawer__close { color: #e8eaed; }
+}
+
+/* compare mode — layout only; columns reuse .panel/.verdict-banner/.gate-row/
+   .error-banner/.banner-info, which already carry their own dark-mode rules, so
+   no colors are introduced here and no dark sub-block is needed. */
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 700px) { .compare-grid { grid-template-columns: 1fr; } }
+
+/* command palette */
+.palette {
+  width: 92vw;
+  max-width: 520px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #1d2125;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.palette input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid #e2e4e8;
+  padding: 0.9rem 1rem;
+  font-size: 1.05rem;
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+.palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.palette__item {
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+.palette__item--active {
+  background: #d7e3ff;
+  border-left-color: #1a73e8;
+  font-weight: 600;
+}
+.palette__typehint { padding: 0.1rem 0.9rem 0.5rem; }
+.palette__def {
+  margin: 0 0.7rem 0.6rem;
+  background: #f8f9fa;
+  border-left: 3px solid #1a73e8;
+  border-radius: 0 6px 6px 0;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.palette__def strong { text-transform: capitalize; }
+.palette__hint {
+  border-top: 1px solid #e2e4e8;
+  padding: 0.5rem 1rem;
+  font-size: 0.78rem;
+  color: #5f6368;
+}
+@media (prefers-color-scheme: dark) {
+  .palette { background: #1f2327; color: #e8eaed; }
+  .palette input { border-bottom-color: #33383d; }
+  .palette__item--active { background: #34435f; }
+  .palette__def { background: #23272b; }
+  .palette__hint { border-top-color: #33383d; color: #9aa0a6; }
+}
+
+/* onboarding */
+.persona-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #e8f0fe;
+  font-size: 0.85rem;
+  padding: 0.35rem 1.25rem;
+}
+.ffm__head { display: flex; align-items: center; justify-content: space-between; }
+.ffm__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+}
+.ffm__check { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.ffm__hide { color: #5f6368; font-weight: 400; }
+
+@media (prefers-color-scheme: dark) {
+  .persona-strip { background: #34435f; }
+  .persona-strip .page-intro__more { color: #8ab4f8; }
+  .ffm__hide { color: #9aa0a6; }
 }
