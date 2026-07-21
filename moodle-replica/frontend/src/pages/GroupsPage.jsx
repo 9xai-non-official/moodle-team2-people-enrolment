@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
+import CourseModeChip from "../components/common/CourseModeChip";
 import Tabs from "../components/common/Tabs";
 import GroupsBoard from "../components/groups/GroupsBoard";
 import GroupingPanel from "../components/groups/GroupingPanel";
@@ -21,6 +22,7 @@ export default function GroupsPage() {
       <div className="form-row">
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} autoSelectFirst />
+        <CourseModeChip courseId={courseId} />
       </div>
 
       {!courseId && <p className="muted">Select a course to view its groups.</p>}

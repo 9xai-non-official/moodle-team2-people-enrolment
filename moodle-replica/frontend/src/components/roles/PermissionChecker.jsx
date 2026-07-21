@@ -25,11 +25,12 @@ function GatePipeline({ gates }) {
   ));
 }
 
-export default function PermissionChecker() {
+export default function PermissionChecker({ replay }) {
   const { actingUser } = useActingUser();
   const [capabilities, setCapabilities] = useState([]);
   const [contexts, setContexts] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [users, setUsers] = useState([]);
   const [actorId, setActorId] = useState(null);
   const [actorTouched, setActorTouched] = useState(false);
   const [capability, setCapability] = useState(null);
@@ -46,11 +47,13 @@ export default function PermissionChecker() {
       apiGet("/api/roles/capabilities"),
       apiGet("/api/roles/contexts"),
       apiGet("/api/roles"),
+      apiGet("/api/users"),
     ])
-      .then(([caps, ctxs, rs]) => {
+      .then(([caps, ctxs, rs, us]) => {
         setCapabilities(caps);
         setContexts(ctxs);
         setRoles(rs);
+        setUsers(us);
         if (caps.length) setCapability((cur) => cur ?? caps[0]);
         if (ctxs.length) setContextId((cur) => cur ?? ctxs[0].id);
       })
@@ -62,11 +65,26 @@ export default function PermissionChecker() {
     if (!actorTouched && actingUser) setActorId(actingUser.id);
   }, [actingUser, actorTouched]);
 
-  function submit() {
+  // Replay from the Decision Log: prefill the stored inputs and re-run.
+  useEffect(() => {
+    const inputs = replay?.inputs;
+    if (!inputs) return;
+    setActorId(inputs.actor_id);
+    setActorTouched(true);
+    setCapability(inputs.capability);
+    setContextId(inputs.context_id);
+    setTargetUserId(inputs.target_user_id ?? null);
+    setActivityId(inputs.activity_id ?? null);
+    setSimulateRoleId(inputs.simulate_role_id ?? null);
+    submit(inputs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replay?.nonce]);
+
+  function submit(payload) {
     setError(null);
     setResult(null);
     setSubmitting(true);
-    apiPost("/api/permissions/check", {
+    apiPost("/api/permissions/check", payload ?? {
       actor_id: actorId,
       capability,
       context_id: contextId,
@@ -81,8 +99,54 @@ export default function PermissionChecker() {
 
   const activityContexts = contexts.filter((c) => c.level === "activity");
 
+  // One-click hard-case walkthroughs. Resolved by username / context label so
+  // they work in mock AND real-DB mode (ids differ between the two worlds).
+  const SCENARIOS = [
+    { label: "HC-3: scoped TA grades other group", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
+    { label: "HC-3: all-groups TA, same check", actor: "ta.allgroups", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
+    { label: "HC-4: TA grades student in two groups", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.multi" },
+    { label: "Prohibit: guest tries to submit", actor: "student.a", cap: "activity:submit", ctx: "Assignment 1", simulateRole: "guest" },
+  ];
+
+  function runScenario(s) {
+    const actor = users.find((u) => u.username === s.actor);
+    const ctx = contexts.find((c) => c.label.includes(s.ctx));
+    const target = s.target ? users.find((u) => u.username === s.target) : null;
+    const simRole = s.simulateRole ? roles.find((r) => (r.short_name ?? r.shortname) === s.simulateRole) : null;
+    if (!actor || !ctx) {
+      setError(`scenario needs user '${s.actor}' + context '${s.ctx}' — not found in this dataset`);
+      return;
+    }
+    setActorId(actor.id);
+    setActorTouched(true);
+    setCapability(s.cap);
+    setContextId(ctx.id);
+    setTargetUserId(target?.id ?? null);
+    setActivityId(ctx.level === "activity" ? ctx.instance_id : null);
+    setSimulateRoleId(simRole?.id ?? null);
+    submit({
+      actor_id: actor.id,
+      capability: s.cap,
+      context_id: ctx.id,
+      target_user_id: target?.id ?? undefined,
+      activity_id: ctx.level === "activity" ? ctx.instance_id : undefined,
+      simulate_role_id: simRole?.id ?? undefined,
+    });
+  }
+
   return (
     <div>
+      <div className="panel">
+        <div className="panel__title">Demo scenarios — one click per hard case</div>
+        <div className="form-row">
+          {SCENARIOS.map((s) => (
+            <button key={s.label} className="btn" onClick={() => runScenario(s)} disabled={submitting}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel__title">Check a permission</div>
         <div className="form-row">

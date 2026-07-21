@@ -266,6 +266,7 @@ function runCheck(body) {
     reasons,
     gates,
     capability_values: g3.capability_values,
+    inputs: { ...body }, // original request — lets the UI replay the check
   };
   DECISIONS.unshift(decision); // newest first
   return decision;

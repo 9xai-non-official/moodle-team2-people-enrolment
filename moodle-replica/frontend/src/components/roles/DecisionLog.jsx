@@ -7,7 +7,7 @@ import Modal from "../common/Modal";
 import Badge from "../common/Badge";
 import ReasonList from "../common/ReasonList";
 
-export default function DecisionLog() {
+export default function DecisionLog({ onReplay }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -33,6 +33,23 @@ export default function DecisionLog() {
       ),
     },
     { key: "created_at", label: "When", render: (r) => new Date(r.created_at).toLocaleString() },
+    {
+      key: "replay",
+      label: "",
+      render: (r) =>
+        onReplay && (
+          <button
+            className="btn"
+            title="Re-run this check in the Permission Checker with the same inputs"
+            onClick={(e) => {
+              e.stopPropagation(); // row click opens the modal; this jumps tabs
+              onReplay(r);
+            }}
+          >
+            Replay
+          </button>
+        ),
+    },
   ];
 
   return (
