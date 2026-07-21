@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../api";
 import { useActingUser } from "../../context/ActingUser";
 import UserSelect from "../common/UserSelect";
+import ContextPath from "../common/ContextPath";
 import Badge from "../common/Badge";
 import ReasonList from "../common/ReasonList";
 
@@ -214,12 +215,13 @@ export default function PermissionChecker({ replay }) {
           </select>
           <button
             className="btn btn--primary"
-            onClick={submit}
+            onClick={() => submit()}
             disabled={!actorId || !capability || !contextId || submitting}
           >
             {submitting ? "Checking…" : "Check"}
           </button>
         </div>
+        <ContextPath contextId={contextId} contexts={contexts} />
         {error && <div className="error-banner">{error}</div>}
       </div>
 

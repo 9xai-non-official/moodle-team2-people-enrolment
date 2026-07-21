@@ -3,6 +3,7 @@
 // per enrolment PATH, not per user: a user with two ways in gets two clusters.
 import { useEffect, useState } from "react";
 import { apiGet, apiPatch, apiDelete } from "../../api";
+import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import DataTable from "../common/DataTable";
 import ExportCsvButton from "../common/ExportCsvButton";
@@ -24,6 +25,7 @@ const STATUS_TITLE = {
 const fmtAccess = (iso) => (iso ? new Date(iso).toLocaleDateString() : "never");
 
 export default function ParticipantsTable({ courseId, onOpenUser }) {
+  const { setActingUserId } = useActingUser();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -57,9 +59,18 @@ export default function ParticipantsTable({ courseId, onOpenUser }) {
       key: "name",
       label: "Name",
       render: (r) => (
-        <button className="btn" onClick={() => onOpenUser(r.user_id, r.full_name)}>
-          {r.full_name}
-        </button>
+        <span>
+          <button className="btn" onClick={() => onOpenUser(r.user_id, r.full_name)}>
+            {r.full_name}
+          </button>
+          <button
+            className="btn"
+            title="switch the whole app to this persona"
+            onClick={() => setActingUserId(r.user_id)}
+          >
+            Act as
+          </button>
+        </span>
       ),
     },
     { key: "roles", label: "Roles", render: (r) => r.roles.join(", ") || "—" },

@@ -81,6 +81,22 @@ export default function UserPathsDrawer({ userId, userName, onClose }) {
         Two rows into one course = two ways in (HC-1); removing one keeps the
         user enrolled via the other.
       </p>
+      {rows.length > 0 && (
+        <div className="form-row">
+          {[...new Map(rows.map((r) => [r.course?.short_name, null])).keys()].map((sn) => {
+            const paths = rows.filter((r) => r.course?.short_name === sn);
+            const live = paths.filter((r) => r.live).length;
+            return (
+              <span className="chip" key={sn} title={`${live} of ${paths.length} paths live — in the course iff any path is live`}>
+                {sn}
+                <Badge variant={live > 0 ? "green" : "red"}>
+                  {live > 0 ? `IN (${live}/${paths.length} live)` : "OUT"}
+                </Badge>
+              </span>
+            );
+          })}
+        </div>
+      )}
       <DataTable
         loading={loading}
         error={error}
