@@ -85,3 +85,76 @@
   .nav-item--active { background: #34435f; }
   .placeholder { color: #9aa0a6; }
 }
+
+/* --- Progress dashboard --- */
+.controls { margin: 0.5rem 0 1.25rem; }
+.controls select {
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #c7cad0;
+  font-size: 0.95rem;
+}
+.error { color: #c5221f; }
+
+.grid {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 820px;
+}
+.grid th, .grid td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #e2e4e8;
+  font-size: 0.92rem;
+}
+.grid th { color: #5f6368; font-weight: 600; }
+
+.progress {
+  position: relative;
+  height: 18px;
+  background: #e6e8eb;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.progress__fill {
+  height: 100%;
+  background: #4285f4;
+  transition: width 0.3s ease;
+}
+.progress__fill--done { background: #34a853; }
+.progress__label {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  font-size: 0.72rem;
+  line-height: 18px;
+  color: #1d2125;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.badge--done { background: #e6f4ea; color: #137333; }
+.badge--wip { background: #fef7e0; color: #b06000; }
+
+.btn {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #c7cad0;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn:hover { background: #f1f3f4; }
+
+@media (prefers-color-scheme: dark) {
+  .grid th, .grid td { border-bottom-color: #33383d; }
+  .progress { background: #33383d; }
+  .progress__label { color: #e8eaed; }
+  .controls select, .btn { background: #23272b; color: #e8eaed; border-color: #444; }
+  .btn:hover { background: #2d3237; }
+}

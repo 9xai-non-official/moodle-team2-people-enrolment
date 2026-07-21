@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiGet } from "./api";
+import Dashboard from "./components/Dashboard";
 import "./App.css";
 
 // Placeholder navigation — just the Dashboard for now; add sections later.
@@ -38,10 +39,11 @@ function App() {
         </nav>
 
         <main className="content">
-          <h1>{active}</h1>
-          <p className="placeholder">
-            This is a blank shell. Drop the <strong>{active}</strong> component here.
-          </p>
+          {active === "Dashboard" ? (
+            <Dashboard />
+          ) : (
+            <p className="placeholder">Nothing here yet.</p>
+          )}
         </main>
       </div>
     </div>
