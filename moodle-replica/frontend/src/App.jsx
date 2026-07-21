@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, USE_MOCKS } from "./api";
 import { ActingUserProvider, useActingUser } from "./context/ActingUser";
+import { SelectedCourseProvider } from "./context/SelectedCourse";
 import { PAGES, NAV_ITEMS } from "./pages";
 import "./App.css";
 
@@ -74,7 +75,9 @@ function Shell() {
 function App() {
   return (
     <ActingUserProvider>
-      <Shell />
+      <SelectedCourseProvider>
+        <Shell />
+      </SelectedCourseProvider>
     </ActingUserProvider>
   );
 }

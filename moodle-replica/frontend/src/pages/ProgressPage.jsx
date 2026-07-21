@@ -2,6 +2,7 @@
 // History tabs. Report and Criteria need a course; My progress and History
 // work without one.
 import { useState } from "react";
+import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
 import Tabs from "../components/common/Tabs";
 import CompletionGrid from "../components/progress/CompletionGrid";
@@ -12,7 +13,7 @@ import HistoryTimeline from "../components/progress/HistoryTimeline";
 const TABS = ["Report", "My progress", "Criteria", "History"];
 
 export default function ProgressPage() {
-  const [courseId, setCourseId] = useState(null);
+  const { courseId, setCourseId } = useSelectedCourse();
   const [tab, setTab] = useState("Report");
 
   return (

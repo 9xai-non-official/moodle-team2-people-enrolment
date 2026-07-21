@@ -25,6 +25,7 @@ export default function CourseSelect({
   return (
     <select
       className="select"
+      aria-label="Course"
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
     >

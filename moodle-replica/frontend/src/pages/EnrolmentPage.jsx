@@ -3,6 +3,7 @@
 // the per-user paths drawer (HC-1).
 import { useEffect, useState } from "react";
 import { apiGet } from "../api";
+import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
 import Tabs from "../components/common/Tabs";
 import DataTable from "../components/common/DataTable";
@@ -87,7 +88,7 @@ function OtherUsersTab({ courseId }) {
 }
 
 export default function EnrolmentPage() {
-  const [courseId, setCourseId] = useState(null);
+  const { courseId, setCourseId } = useSelectedCourse();
   const [tab, setTab] = useState("Participants");
   const [drawer, setDrawer] = useState(null); // { id, name }
 

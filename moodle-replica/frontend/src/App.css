@@ -195,6 +195,7 @@ h2 { font-size: 1.15rem; margin: 1.5rem 0 0.6rem; }
   color: #1d2125;
 }
 
+.table-scroll { overflow-x: auto; }
 .data-table {
   width: 100%;
   border-collapse: collapse;

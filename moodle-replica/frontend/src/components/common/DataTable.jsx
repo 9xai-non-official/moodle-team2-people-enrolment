@@ -12,7 +12,8 @@ export default function DataTable({
   onRowClick,
 }) {
   return (
-    <table className="data-table">
+    <div className="table-scroll">
+      <table className="data-table">
       <thead>
         <tr>
           {columns.map((c) => (
@@ -66,6 +67,7 @@ export default function DataTable({
             </tr>
           ))}
       </tbody>
-    </table>
+      </table>
+    </div>
   );
 }

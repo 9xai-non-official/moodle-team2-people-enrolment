@@ -27,7 +27,7 @@ async function request(method, path, body) {
     } catch {
       payload = { detail: res.statusText };
     }
-    throw new ApiError(res.status, payload);
+    throw new ApiError(res.status, payload, `${method} ${path.split("?")[0]}`);
   }
   if (res.status === 204) return null;
   return res.json();
