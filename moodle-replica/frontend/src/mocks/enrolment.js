@@ -424,4 +424,16 @@ export const routes = [
           .filter(Boolean),
       })),
   },
+  {
+    method: "GET",
+    pattern: /^\/api\/enrolment\/cohorts\/(\d+)\/members$/,
+    handler: (m) => {
+      const c = COHORTS.find((x) => x.id === Number(m[1]));
+      if (!c) throw new ApiError(404, { detail: `cohort ${m[1]} not found` });
+      return c.member_ids.map((id) => {
+        const u = userById(id);
+        return { user_id: id, username: u?.username, full_name: u?.full_name };
+      });
+    },
+  },
 ];
