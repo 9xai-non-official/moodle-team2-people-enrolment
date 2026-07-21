@@ -7,6 +7,7 @@ import { ApiError } from "../../errors";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import DataTable from "../common/DataTable";
+import ExportCsvButton from "../common/ExportCsvButton";
 import Modal from "../common/Modal";
 import ReasonList from "../common/ReasonList";
 
@@ -160,6 +161,27 @@ export default function CompletionGrid({ courseId }) {
         <button className="btn" onClick={() => setViewAs((v) => !v)}>
           {viewAs ? "Exit student view" : `View as ${actingUser?.full_name ?? "student"}`}
         </button>
+        <ExportCsvButton
+          filename={`completion-course-${courseId}.csv`}
+          rows={report?.rows ?? []}
+          columns={[
+            { key: "full_name", label: "user" },
+            ...activities.map((a) => ({
+              key: `a${a.id}`,
+              label: a.name + (a.hidden ? " (hidden)" : ""),
+              value: (r) => {
+                const cell = r.cells.find((c) => c.activity_id === a.id);
+                const state = cell?.state ?? "incomplete";
+                return cell?.overridden_by ? `${state} (overridden)` : state;
+              },
+            })),
+            {
+              key: "course_complete",
+              label: "course_complete",
+              value: (r) => (r.course_complete?.done ? r.course_complete.at : "no"),
+            },
+          ]}
+        />
       </div>
 
       {viewAs && (

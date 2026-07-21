@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPatch, apiDelete } from "../../api";
 import Badge from "../common/Badge";
 import DataTable from "../common/DataTable";
+import ExportCsvButton from "../common/ExportCsvButton";
 import EnrolUserModal from "./EnrolUserModal";
 
 const STATUS_VARIANT = {
@@ -167,6 +168,23 @@ export default function ParticipantsTable({ courseId, onOpenUser }) {
         <button className="btn btn--primary" onClick={() => setShowEnrol(true)}>
           Enrol user
         </button>
+        <ExportCsvButton
+          filename={`participants-course-${courseId}-${status}.csv`}
+          rows={rows}
+          columns={[
+            { key: "username", label: "username" },
+            { key: "full_name", label: "name" },
+            { key: "roles", label: "roles", value: (r) => (r.roles ?? []).join("|") },
+            {
+              key: "paths",
+              label: "methods",
+              value: (r) => (r.paths ?? []).map((p) => `${p.method}:${p.status}`).join("|"),
+            },
+            { key: "effective_status", label: "effective_status" },
+            { key: "groups", label: "groups", value: (r) => (r.groups ?? []).map((g) => g.name).join("|") },
+            { key: "last_access", label: "last_access" },
+          ]}
+        />
       </div>
 
       {actionError && <div className="error-banner">{actionError}</div>}

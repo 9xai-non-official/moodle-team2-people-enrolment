@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
+import CourseModeChip from "../components/common/CourseModeChip";
 import Tabs from "../components/common/Tabs";
 import CompletionGrid from "../components/progress/CompletionGrid";
 import MyProgress from "../components/progress/MyProgress";
@@ -23,6 +24,7 @@ export default function ProgressPage() {
       <div className="form-row">
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} autoSelectFirst />
+        <CourseModeChip courseId={courseId} />
       </div>
 
       <Tabs tabs={TABS} active={tab} onChange={setTab} />

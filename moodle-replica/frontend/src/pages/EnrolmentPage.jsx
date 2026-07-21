@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { apiGet } from "../api";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
+import CourseModeChip from "../components/common/CourseModeChip";
 import Tabs from "../components/common/Tabs";
 import DataTable from "../components/common/DataTable";
 import ParticipantsTable from "../components/enrolment/ParticipantsTable";
@@ -98,6 +99,7 @@ export default function EnrolmentPage() {
       <div className="form-row">
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} autoSelectFirst />
+        <CourseModeChip courseId={courseId} />
       </div>
 
       {!courseId ? (
