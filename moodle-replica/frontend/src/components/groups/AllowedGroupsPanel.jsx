@@ -47,7 +47,10 @@ export default function AllowedGroupsPanel({ courseId }) {
 
   return (
     <div className="panel">
-      <div className="panel__title">Who can I see here?</div>
+      <div className="panel__title">Who can I see?</div>
+      <p className="muted">
+        Visibility only: the groups this actor may see inside the chosen activity.
+      </p>
       <div className="form-row">
         <label>Actor</label>
         <UserSelect value={actorId} onChange={setActorId} placeholder="— actor —" />

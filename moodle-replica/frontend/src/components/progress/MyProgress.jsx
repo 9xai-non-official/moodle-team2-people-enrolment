@@ -80,9 +80,11 @@ export default function MyProgress() {
             <div className="card__title">
               {row.course.short_name}
               {row.course.deleted && (
-                <Badge variant="amber" title="served from snapshots">
-                  deleted — served from snapshots
-                </Badge>
+                <span className="progress-deleted-flag">
+                  <Badge variant="amber" title="served from snapshots">
+                    deleted — served from snapshots
+                  </Badge>
+                </span>
               )}
             </div>
             <Bar

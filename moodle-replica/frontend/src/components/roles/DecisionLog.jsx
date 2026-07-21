@@ -7,6 +7,19 @@ import Modal from "../common/Modal";
 import Badge from "../common/Badge";
 import ReasonList from "../common/ReasonList";
 
+// Relative age of a timestamp, computed at render — presentation only.
+function relTime(iso) {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
 export default function DecisionLog({ onReplay }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -32,7 +45,13 @@ export default function DecisionLog({ onReplay }) {
         <Badge variant={r.verdict === "allowed" ? "green" : "red"}>{r.verdict}</Badge>
       ),
     },
-    { key: "created_at", label: "When", render: (r) => new Date(r.created_at).toLocaleString() },
+    {
+      key: "created_at",
+      label: "When",
+      render: (r) => (
+        <span title={new Date(r.created_at).toLocaleString()}>{relTime(r.created_at)}</span>
+      ),
+    },
     {
       key: "replay",
       label: "",

@@ -1,13 +1,14 @@
 // Manual enrolment (task 06 §4.2). Role options come from GET /api/roles
 // (Khaled's domain); default is the manual method's default_role. Backend
 // refusals are shown verbatim via ReasonList — never swallowed.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../../api";
 import Modal from "../common/Modal";
 import UserSelect from "../common/UserSelect";
 import ReasonList from "../common/ReasonList";
 
 export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) {
+  const fieldsRef = useRef(null);
   const [roles, setRoles] = useState([]);
   const [method, setMethod] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -37,6 +38,17 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
       .catch((e) => setError(e.message));
   }, [open, courseId]);
 
+  // Autofocus the user select whenever the modal opens — it's the first
+  // control and the field every enrolment must start from.
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(
+      () => fieldsRef.current?.querySelector("select")?.focus(),
+      0,
+    );
+    return () => clearTimeout(t);
+  }, [open]);
+
   // Keep the modal usable even if /api/roles isn't served yet.
   const roleOptions = roles.length
     ? roles
@@ -63,6 +75,15 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
       .finally(() => setBusy(false));
   };
 
+  // Enter anywhere in the form submits once a user is chosen (the only
+  // required field); selects and datetime inputs otherwise swallow it.
+  const onFormKeyDown = (e) => {
+    if (e.key === "Enter" && userId && !busy) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -83,6 +104,7 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
         </>
       }
     >
+      <div ref={fieldsRef} onKeyDown={onFormKeyDown}>
       {error && <div className="error-banner">{error}</div>}
       <div className="form-row">
         <label>User</label>
@@ -123,6 +145,7 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
       {reasons && (
         <ReasonList reasons={reasons} tone="error" title="Could not enrol" />
       )}
+      </div>
     </Modal>
   );
 }

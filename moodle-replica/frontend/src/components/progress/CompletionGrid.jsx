@@ -35,7 +35,9 @@ export default function CompletionGrid({ courseId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [groups, setGroups] = useState([]);
-  const [groupId, setGroupId] = useState("");
+  const [groupId, setGroupId] = useState(
+    () => localStorage.getItem(`grid-group-${courseId}`) ?? "",
+  );
   const [viewAs, setViewAs] = useState(false);
   const [target, setTarget] = useState(null); // override modal: {userId, activityId}
   const [overrideState, setOverrideState] = useState("complete");
@@ -60,6 +62,18 @@ export default function CompletionGrid({ courseId }) {
       .then((list) => setGroups(Array.isArray(list) ? list : []))
       .catch(() => setGroups([]));
   }, [courseId]);
+
+  // Remember the last group filter per course (§4.5 flow) — restore on course
+  // change, persist on user change. ponytail: a since-deleted group id lingers
+  // until re-picked; per-course keying keeps it from bleeding across courses.
+  useEffect(() => {
+    setGroupId(localStorage.getItem(`grid-group-${courseId}`) ?? "");
+  }, [courseId]);
+  const changeGroup = (v) => {
+    setGroupId(v);
+    if (v) localStorage.setItem(`grid-group-${courseId}`, v);
+    else localStorage.removeItem(`grid-group-${courseId}`);
+  };
 
   async function manualTick(activityId) {
     try {
@@ -150,7 +164,7 @@ export default function CompletionGrid({ courseId }) {
     <div>
       <div className="form-row">
         <label>Group</label>
-        <select className="select" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+        <select className="select" value={groupId} onChange={(e) => changeGroup(e.target.value)}>
           <option value="">all groups</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
@@ -187,6 +201,13 @@ export default function CompletionGrid({ courseId }) {
       {viewAs && (
         <div className="banner-info">
           viewing as {actingUser?.full_name} — actions disabled (student simulation)
+          <button
+            className="btn"
+            style={{ marginLeft: "0.6rem" }}
+            onClick={() => setViewAs(false)}
+          >
+            Exit student view
+          </button>
         </div>
       )}
 

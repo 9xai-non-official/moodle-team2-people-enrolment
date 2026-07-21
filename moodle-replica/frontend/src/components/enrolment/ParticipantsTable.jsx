@@ -33,6 +33,23 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
   const [status, setStatus] = useState("active");
   const [busy, setBusy] = useState(false);
   const [showEnrol, setShowEnrol] = useState(false);
+  const [lastChanged, setLastChanged] = useState(null); // user id to flash
+
+  // counts of the rows the API returned for the current filter — presentation
+  // only, no status logic (that all lives server-side in effective_status).
+  const activeCount = rows.filter((r) => r.effective_status === "active").length;
+  const acctSuspCount = rows.filter((r) => r.effective_status === "account_suspended").length;
+  const dualPathCount = rows.filter((r) => (r.paths?.length ?? 0) > 1).length;
+  const summary = rows.length
+    ? [
+        `${rows.length} ${rows.length === 1 ? "person" : "people"}`,
+        `${activeCount} active`,
+        acctSuspCount && `${acctSuspCount} suspended account${acctSuspCount === 1 ? "" : "s"}`,
+        dualPathCount && `${dualPathCount} dual-path`,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
 
   const load = () => {
     setLoading(true);
@@ -45,11 +62,17 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
 
   useEffect(load, [courseId, status]);
 
-  const mutate = (promise) => {
+  const mutate = (promise, userId) => {
     setBusy(true);
     setActionError(null);
     promise
-      .then(load)
+      .then(() => {
+        load();
+        if (userId != null) {
+          setLastChanged(userId);
+          setTimeout(() => setLastChanged(null), 900); // clears the flash class
+        }
+      })
       .catch((e) => setActionError(e.message))
       .finally(() => setBusy(false));
   };
@@ -132,17 +155,19 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
       label: "Actions",
       render: (r) =>
         r.paths.map((p) => (
-          <div key={p.enrolment_id} className="form-row">
+          <div key={p.enrolment_id} className="form-row path-actions">
             <span className="muted">{p.method}</span>
             {p.status === "active" ? (
               <button
                 className="btn"
+                title={`${p.method} path`}
                 disabled={busy}
                 onClick={() =>
                   mutate(
                     apiPatch(`/api/enrolment/enrolments/${p.enrolment_id}`, {
                       status: "suspended",
                     }),
+                    r.user_id,
                   )
                 }
               >
@@ -151,12 +176,14 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
             ) : (
               <button
                 className="btn"
+                title={`${p.method} path`}
                 disabled={busy}
                 onClick={() =>
                   mutate(
                     apiPatch(`/api/enrolment/enrolments/${p.enrolment_id}`, {
                       status: "active",
                     }),
+                    r.user_id,
                   )
                 }
               >
@@ -165,13 +192,14 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
             )}
             <button
               className="btn btn--danger"
+              title={`${p.method} path`}
               disabled={busy}
               onClick={() =>
                 window.confirm(
                   `Unenrol this ${p.method} path?\n\nIf it's their last path they ` +
                   "leave the course roster — but their completion records survive " +
                   "and progress resumes if they return (hard case #2).",
-                ) && mutate(apiDelete(`/api/enrolment/enrolments/${p.enrolment_id}`))
+                ) && mutate(apiDelete(`/api/enrolment/enrolments/${p.enrolment_id}`), r.user_id)
               }
             >
               Unenrol
@@ -181,8 +209,12 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
     },
   ];
 
+  // counts are only sound when every status is loaded (the 'all' filter);
+  // under a narrowed filter the other buckets aren't in `rows`, so stay plain.
+  const showCounts = status === "all";
+
   return (
-    <div>
+    <div className="roster">
       <div className="form-row">
         <label>Status</label>
         <select
@@ -190,9 +222,9 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
-          <option value="active">Active</option>
+          <option value="active">{showCounts ? `Active (${activeCount})` : "Active"}</option>
           <option value="suspended">Suspended</option>
-          <option value="all">All</option>
+          <option value="all">{showCounts ? `All (${rows.length})` : "All"}</option>
         </select>
         <button className="btn btn--primary" onClick={() => setShowEnrol(true)}>
           Enrol user
@@ -218,6 +250,15 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
 
       {actionError && <div className="error-banner">{actionError}</div>}
 
+      {summary && (
+        <div
+          className="roster-summary muted"
+          title="counts of the rows loaded for this filter — presentation only"
+        >
+          {summary}
+        </div>
+      )}
+
       <DataTable
         loading={loading}
         error={loadError}
@@ -235,6 +276,7 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
           </span>
         }
         rowKey={(r) => r.user_id}
+        rowClassName={(r) => (r.user_id === lastChanged ? "row--flash" : "")}
         columns={columns}
       />
 

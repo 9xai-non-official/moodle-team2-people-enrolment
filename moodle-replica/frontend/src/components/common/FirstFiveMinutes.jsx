@@ -4,7 +4,7 @@ import { useState } from "react";
 
 const STEPS = [
   { slug: "tour", label: "Take the tour", go: () => window.dispatchEvent(new CustomEvent("open-tour")) },
-  { slug: "persona", label: "Become somebody else", hint: "use the chips below" },
+  { slug: "persona", label: "Become somebody else", hint: "use the chips above" },
   { slug: "roles", label: "Run a permission scenario", nav: "Roles" },
   { slug: "demos", label: "Drop & return a student, live", nav: "Demos" },
   { slug: "progress", label: "Find the hidden activity", nav: "Progress" },

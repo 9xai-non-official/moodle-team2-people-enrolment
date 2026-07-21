@@ -3,7 +3,7 @@
 // order (a passed capability gate stays green right beside a failed group
 // gate — the display never short-circuits), the per-role capability
 // resolution, and the reasons. No business rules live in this component.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiPost } from "../../api";
 import { cachedGet } from "../../lib/catalog";
 import { useActingUser } from "../../context/ActingUser";
@@ -115,6 +115,8 @@ export default function PermissionChecker({ replay }) {
   const [compareB, setCompareB] = useState(null);
   const [compareResult, setCompareResult] = useState(null);
   const [comparing, setComparing] = useState(false);
+  const resultRef = useRef(null);
+  const scrollToResult = useRef(false); // armed by scenario buttons only
 
   useEffect(() => {
     Promise.all([
@@ -155,6 +157,17 @@ export default function PermissionChecker({ replay }) {
     submit(inputs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replay?.nonce]);
+
+  // When a scenario button ran the check, bring the verdict into view.
+  useEffect(() => {
+    if (!result || !scrollToResult.current) return;
+    scrollToResult.current = false;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    resultRef.current?.scrollIntoView({
+      behavior: reduce ? "auto" : "smooth",
+      block: "start",
+    });
+  }, [result]);
 
   function submit(payload) {
     setError(null);
@@ -207,10 +220,10 @@ export default function PermissionChecker({ replay }) {
   // One-click hard-case walkthroughs. Resolved by username / context label so
   // they work in mock AND real-DB mode (ids differ between the two worlds).
   const SCENARIOS = [
-    { label: "HC-3: scoped TA grades other group", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
-    { label: "HC-3: all-groups TA, same check", actor: "ta.allgroups", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
-    { label: "HC-4: TA grades student in two groups", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.multi" },
-    { label: "Prohibit: guest tries to submit", actor: "student.a", cap: "activity:submit", ctx: "Assignment 1", simulateRole: "guest" },
+    { label: "HC-3: scoped TA grades other group", sub: "Role allows grading — group scope still blocks this target.", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
+    { label: "HC-3: all-groups TA, same check", sub: "Same action, all-groups role — the group gate now passes.", actor: "ta.allgroups", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
+    { label: "HC-4: TA grades student in two groups", sub: "One shared group is enough — overlap allows the grade.", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.multi" },
+    { label: "Prohibit: guest tries to submit", sub: "Prohibit outranks allow — no lower level can re-enable it.", actor: "student.a", cap: "activity:submit", ctx: "Assignment 1", simulateRole: "guest" },
   ];
 
   function runScenario(s) {
@@ -229,6 +242,7 @@ export default function PermissionChecker({ replay }) {
     setTargetUserId(target?.id ?? null);
     setActivityId(ctx.level === "activity" ? ctx.instance_id : null);
     setSimulateRoleId(simRole?.id ?? null);
+    scrollToResult.current = true; // arm the auto-scroll for this run
     submit({
       actor_id: actor.id,
       capability: s.cap,
@@ -245,8 +259,14 @@ export default function PermissionChecker({ replay }) {
         <div className="panel__title">Demo scenarios — one click per hard case</div>
         <div className="form-row">
           {SCENARIOS.map((s) => (
-            <button key={s.label} className="btn" onClick={() => runScenario(s)} disabled={submitting}>
-              {s.label}
+            <button
+              key={s.label}
+              className="btn btn--scenario"
+              onClick={() => runScenario(s)}
+              disabled={submitting}
+            >
+              <span className="btn--scenario__label">{s.label}</span>
+              <span className="btn--scenario__sub">{s.sub}</span>
             </button>
           ))}
         </div>
@@ -325,12 +345,15 @@ export default function PermissionChecker({ replay }) {
             {submitting ? "Checking…" : "Check"}
           </button>
         </div>
+        <div className="muted">
+          Leave target/activity empty for a pure capability check.
+        </div>
         <ContextPath contextId={contextId} contexts={contexts} />
         {error && <div className="error-banner">{error}</div>}
       </div>
 
       {result && (
-        <div className="panel">
+        <div className="panel checker-verdict" ref={resultRef}>
           <div className={`verdict-banner verdict-banner--${result.verdict}`}>
             {result.verdict.toUpperCase()}
           </div>
@@ -342,7 +365,9 @@ export default function PermissionChecker({ replay }) {
           </p>
 
           <div className="panel__title">Gate pipeline</div>
-          <GatePipeline gates={result.gates} />
+          <div className="gate-list">
+            <GatePipeline gates={result.gates} />
+          </div>
 
           {result.capability_values.length > 0 && (
             <>

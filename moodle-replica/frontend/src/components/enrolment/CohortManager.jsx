@@ -134,6 +134,7 @@ export default function CohortManager() {
 
   return (
     <div>
+      <div className="panel__title">Cohorts</div>
       <div className="panel">
         <div className="panel__title">New cohort</div>
         {createError && <div className="error-banner">{createError}</div>}

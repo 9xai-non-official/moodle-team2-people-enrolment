@@ -39,6 +39,7 @@ export default function MethodsPanel({ courseId }) {
 
   return (
     <div>
+      <div className="panel__title">Enrolment methods</div>
       <MethodCreateForm courseId={courseId} onCreated={load} />
 
       {loading && <p className="muted">Loading…</p>}

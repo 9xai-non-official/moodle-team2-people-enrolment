@@ -591,3 +591,235 @@ tr.row--highlight { background: #fef7e0; }
   .persona-strip .page-intro__more { color: #8ab4f8; }
   .ffm__hide { color: #9aa0a6; }
 }
+
+/* page polish: groups+progress */
+
+/* Groups — card header: name + badges left, actions right */
+.group-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.group-card__name { display: inline-flex; align-items: center; gap: 0.15rem; flex-wrap: wrap; }
+.group-card__actions { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+/* Groups — member chips fade in, lightly staggered */
+.group-members .chip {
+  animation: gp-chip-in 120ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 25ms);
+}
+@keyframes gp-chip-in { from { opacity: 0; } }
+
+/* Progress — report header sticks within the table's own vertical scroll */
+.progress-page .table-scroll { max-height: 70vh; }
+.progress-page .data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: inset 0 -1px 0 #e2e4e8;
+}
+
+/* Progress — completion glyph hover feedback */
+.progress-page .glyph { transition: transform 120ms ease; }
+.progress-page .glyph:hover { transform: scale(1.3); }
+
+/* Progress — percent bars grow from empty on load */
+.progress-page .bar__fill { animation: gp-bar-grow 600ms ease-out; }
+@keyframes gp-bar-grow { from { width: 0; } }
+
+/* Progress — history snapshots slide in, staggered */
+.progress-snap {
+  animation: gp-snap-in 240ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+@keyframes gp-snap-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Progress — deleted-course badge pulses once on first render */
+.progress-deleted-flag { display: inline-block; animation: gp-pulse-once 800ms ease-in-out 1; }
+@keyframes gp-pulse-once { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+/* Groups — activity-policy row flashes once after its editor saves (translucent
+   tint reads on both light and amber-highlighted rows in either theme) */
+.gp-row-flash { animation: gp-row-flash 800ms ease-out 1; }
+@keyframes gp-row-flash { from { background-color: rgba(26, 115, 232, 0.28); } }
+
+@media (prefers-color-scheme: dark) {
+  .progress-page .data-table th { background: #16191c; box-shadow: inset 0 -1px 0 #33383d; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-members .chip,
+  .progress-page .bar__fill,
+  .progress-snap,
+  .progress-deleted-flag,
+  .gp-row-flash { animation: none; }
+  .progress-page .glyph { transition: none; }
+  .progress-page .glyph:hover { transform: none; }
+}
+
+/* page polish: dashboard+demos */
+
+/* Dashboard — headline counts are buttons that open their page; keep the
+   centered stat look, add a hover lift + pointer. */
+button.card--stat {
+  width: 100%;
+  font: inherit;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+button.card--stat:hover {
+  background: #f4f7ff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+/* Dashboard — "now look at" suggestion under the chips; fades in on switch
+   (the line is re-keyed by acting-user id). */
+.look-at {
+  font-size: 0.85rem;
+  color: #5f6368;
+  margin: 0.2rem 0 0.5rem;
+  animation: look-at-in 140ms ease-out;
+}
+@keyframes look-at-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Dashboard — section jump-card carries its live count on the right. */
+.section-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Demos — HC cards get a hover lift + a one-line "what you'll see". */
+.hc-card { transition: transform 140ms ease, box-shadow 140ms ease; }
+.hc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+.hc-card__see {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1a56b8;
+  margin-bottom: 0.35rem;
+}
+
+/* Demos — HC-2 setup row is a native fieldset so it disables wholesale while a
+   step runs. */
+.setup-fieldset { border: 0; padding: 0; margin: 0.5rem 0; min-width: 0; }
+
+/* Demos — HC-2 step timeline pills (baseline / dropped / returned). */
+.step-pills { display: flex; gap: 0.4rem; margin: 0.6rem 0; }
+.step-pill {
+  padding: 0.15rem 0.6rem;
+  border-radius: 12px;
+  background: #eef0f2;
+  color: #5f6368;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.step-pill--done { background: #e6f4ea; color: #137333; }
+.step-pill--on { background: #1a73e8; color: #fff; }
+
+/* Demos — HC-2 step content fades/slides in on each step change. */
+.step-panel { animation: step-in 140ms ease-out; }
+@keyframes step-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Demos — API trail reads as a log: monospace, newest line flashes once. */
+.trail-line {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: #5f6368;
+  padding: 0.1rem 0;
+  border-radius: 3px;
+}
+.trail-line--new { animation: trail-flash 900ms ease-out; }
+@keyframes trail-flash {
+  from { background: #fef7e0; }
+  to { background: transparent; }
+}
+@keyframes trail-flash-dark {
+  from { background: #3a3420; }
+  to { background: transparent; }
+}
+
+@media (prefers-color-scheme: dark) {
+  button.card--stat:hover { background: #262c33; }
+  .hc-card__see { color: #8ab4f8; }
+  .step-pill { background: #2d3237; color: #9aa0a6; }
+  .trail-line { color: #9aa0a6; }
+  .trail-line--new { animation-name: trail-flash-dark; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.card--stat,
+  .look-at,
+  .hc-card,
+  .step-panel,
+  .trail-line--new { animation: none; transition: none; }
+}
+
+/* page polish: enrolment+roles ------------------------------------------- */
+
+/* Enrolment · summary line above the roster (counts of loaded rows only) */
+.roster-summary { margin: 0.2rem 0 0.4rem; }
+
+/* Enrolment · per-path action cluster gains a faint tint on row hover */
+.roster .path-actions { border-radius: 6px; }
+.roster tbody tr:hover .path-actions { background: rgba(26, 115, 232, 0.08); }
+
+/* Roles · scenario buttons stack a one-line subtitle under their label */
+.btn--scenario {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  max-width: 16rem;
+  text-align: left;
+  line-height: 1.25;
+}
+.btn--scenario__label { font-weight: 600; }
+.btn--scenario__sub { font-size: 0.75rem; color: #5f6368; white-space: normal; }
+
+/* motion — all of it gated on prefers-reduced-motion */
+@media (prefers-reduced-motion: no-preference) {
+  .roster .path-actions { transition: background-color 120ms ease; }
+
+  /* affected row flashes once after a successful mutation */
+  tr.row--flash { animation: row-flash 900ms ease-out; }
+  @keyframes row-flash {
+    from { background: var(--flash-bg, #fff3c4); }
+    to { background: transparent; }
+  }
+
+  /* verdict fades in; its gate rows stagger up on each fresh check */
+  .checker-verdict .verdict-banner { animation: cv-fade 260ms ease both; }
+  .checker-verdict .gate-list .gate-row { animation: cv-rise 260ms ease both; }
+  .checker-verdict .gate-list .gate-row:nth-child(2) { animation-delay: 60ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(3) { animation-delay: 120ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(4) { animation-delay: 180ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(5) { animation-delay: 240ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(6) { animation-delay: 300ms; }
+  @keyframes cv-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes cv-rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* dark sub-block */
+@media (prefers-color-scheme: dark) {
+  .btn--scenario__sub { color: #9aa0a6; }
+  .roster tbody tr:hover .path-actions { background: rgba(138, 180, 248, 0.12); }
+  tr.row--flash { --flash-bg: #3a3420; }
+}
