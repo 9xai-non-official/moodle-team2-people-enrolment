@@ -95,10 +95,20 @@ export default function GroupsBoard({ courseId }) {
             {g.members.length === 0 && <span className="muted">no members</span>}
             {g.members.map((mm) => {
               const prov = PROVENANCE[mm.provenance] ?? PROVENANCE[""];
+              // HC-4: membership in several groups of one course is legal —
+              // count across the whole board (API data, only counted here).
+              const inGroups = groups.filter((og) =>
+                og.members.some((m) => m.user_id === mm.user_id),
+              ).length;
               return (
                 <span className="chip" key={mm.user_id}>
                   {mm.full_name}
                   <Badge variant={prov.variant}>{prov.label}</Badge>
+                  {inGroups > 1 && (
+                    <Badge variant="amber" title="member of several groups at once — HC-4; 'separate' mode shows the union">
+                      ×{inGroups}
+                    </Badge>
+                  )}
                   <button
                     className="modal-close"
                     title="remove"

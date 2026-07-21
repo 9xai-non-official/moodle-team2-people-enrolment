@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../api";
 import DataTable from "../common/DataTable";
+import ContextPath from "../common/ContextPath";
 
 const PERMISSIONS = [
   { value: "notset", label: "Not set" },
@@ -122,6 +123,7 @@ export default function CapabilityEditor() {
           ))}
         </select>
       </div>
+      <ContextPath contextId={contextId} contexts={contexts} />
       {error && <div className="error-banner">{error}</div>}
       <DataTable
         columns={columns}

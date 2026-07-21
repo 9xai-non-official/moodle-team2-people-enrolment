@@ -36,6 +36,24 @@ function Shell() {
       .catch(() => setHealth("offline"));
   }, []);
 
+  // Any error banner, clicked → bug-report line on the clipboard
+  // ("[page] message") ready to paste at the owning teammate (task 06 §5).
+  useEffect(() => {
+    function copyError(e) {
+      const banner = e.target.closest(".error-banner");
+      if (!banner) return;
+      const page = document.querySelector(".nav-item--active")?.textContent ?? "?";
+      navigator.clipboard?.writeText(`[${page}] ${banner.textContent}`);
+      const prev = banner.textContent;
+      banner.textContent = "copied for bug report ✓";
+      setTimeout(() => {
+        banner.textContent = prev;
+      }, 800);
+    }
+    document.addEventListener("click", copyError);
+    return () => document.removeEventListener("click", copyError);
+  }, []);
+
   const Page = PAGES[active];
 
   return (
