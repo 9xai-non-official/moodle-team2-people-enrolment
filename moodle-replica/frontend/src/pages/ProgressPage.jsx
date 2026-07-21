@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
 import CourseModeChip from "../components/common/CourseModeChip";
+import PageIntro from "../components/common/PageIntro";
+import Term from "../components/common/Term";
 import Tabs from "../components/common/Tabs";
 import CompletionGrid from "../components/progress/CompletionGrid";
 import MyProgress from "../components/progress/MyProgress";
@@ -20,6 +22,9 @@ export default function ProgressPage() {
   return (
     <div>
       <h1>Progress</h1>
+      <PageIntro line={<>Who finished what — and the record that outlives unenrolment and even course deletion.</>}>
+        <p><Term k="completion">Completion</Term> is a fact about the past: dropping a student does not erase it, and the History tab still answers for courses that no longer exist. <Term k="criteria">Criteria</Term> define what "course complete" means.</p>
+      </PageIntro>
 
       <div className="form-row">
         <label>Course</label>

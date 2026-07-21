@@ -8,29 +8,56 @@ import { mockRequest } from "./mocks";
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8010";
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "1";
 
+// Global activity + write signals: the shell renders a thin top progress bar
+// while anything is in flight and a toast after successful writes — zero
+// per-component wiring, so no fetch can feel like a hang and no save can go
+// unacknowledged.
+let inflight = 0;
+function signalActivity(delta) {
+  inflight = Math.max(0, inflight + delta);
+  window.dispatchEvent(new CustomEvent("api-activity", { detail: inflight }));
+}
+function signalWrite(method, path) {
+  window.dispatchEvent(new CustomEvent("api-write", { detail: { method, path } }));
+}
+
 async function request(method, path, body) {
   if (USE_MOCKS) {
-    const hit = await mockRequest(method, path, body);
-    if (hit) return hit.data; // mock 403/409s throw ApiError from the handler
+    signalActivity(+1);
+    try {
+      const hit = await mockRequest(method, path, body);
+      if (hit) {
+        if (method !== "GET") signalWrite(method, path);
+        return hit.data; // mock 403/409s throw ApiError from the handler
+      }
+    } finally {
+      signalActivity(-1);
+    }
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields.
-    let payload = null;
-    try {
-      payload = await res.json();
-    } catch {
-      payload = { detail: res.statusText };
+  signalActivity(+1);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields.
+      let payload = null;
+      try {
+        payload = await res.json();
+      } catch {
+        payload = { detail: res.statusText };
+      }
+      throw new ApiError(res.status, payload, `${method} ${path.split("?")[0]}`);
     }
-    throw new ApiError(res.status, payload, `${method} ${path.split("?")[0]}`);
+    if (method !== "GET") signalWrite(method, path);
+    if (res.status === 204) return null;
+    return res.json();
+  } finally {
+    signalActivity(-1);
   }
-  if (res.status === 204) return null;
-  return res.json();
 }
 
 export const apiGet = (path) => request("GET", path);

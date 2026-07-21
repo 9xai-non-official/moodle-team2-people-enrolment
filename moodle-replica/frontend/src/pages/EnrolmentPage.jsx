@@ -6,6 +6,8 @@ import { apiGet } from "../api";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
 import CourseModeChip from "../components/common/CourseModeChip";
+import PageIntro from "../components/common/PageIntro";
+import Term from "../components/common/Term";
 import Tabs from "../components/common/Tabs";
 import DataTable from "../components/common/DataTable";
 import ParticipantsTable from "../components/enrolment/ParticipantsTable";
@@ -62,6 +64,10 @@ export default function EnrolmentPage() {
   return (
     <div>
       <h1>Enrolment</h1>
+      <PageIntro line={<>Who is in the course, via which <Term k="method">routes</Term>, and what each route&apos;s state does.</>}>
+        <p>A person can be enrolled by several <Term k="method">methods</Term> at once — added by hand AND synced from a <Term k="cohort" />. They stay in the course while at least one route is alive. The Status badge is the combined <Term k="effective status" />.</p>
+        <p>Click a name to see every route that person has, across all courses.</p>
+      </PageIntro>
       <div className="form-row">
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} autoSelectFirst />

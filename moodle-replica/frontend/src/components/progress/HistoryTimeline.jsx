@@ -82,7 +82,10 @@ export default function HistoryTimeline() {
       {loading && <p className="muted">Loading…</p>}
       {error && <div className="error-banner">{error}</div>}
       {!loading && !error && snaps && snaps.length === 0 && (
-        <p className="muted">No snapshots for this query.</p>
+        <p className="muted">
+          No snapshots for this query — clear the filters ("All time", no user)
+          to see everything, including deleted-course history.
+        </p>
       )}
       {!loading &&
         !error &&

@@ -3,6 +3,8 @@
 // star), and the decision log. A log row can be replayed: it jumps to the
 // checker with the original inputs prefilled and re-runs them.
 import { useState } from "react";
+import PageIntro from "../components/common/PageIntro";
+import Term from "../components/common/Term";
 import Tabs from "../components/common/Tabs";
 import CapabilityEditor from "../components/roles/CapabilityEditor";
 import AssignRoleForm from "../components/roles/AssignRoleForm";
@@ -23,6 +25,10 @@ export default function RolesPage() {
   return (
     <div>
       <h1>Roles &amp; Permissions</h1>
+      <PageIntro line={<>What each <Term k="role" /> may do, where — and the checker that answers "can this person do this, and why".</>}>
+        <p>Permissions live on roles, not people. A <Term k="capability" /> is one nameable action; roles say allow / prevent / <Term k="prohibit" /> for it, at a <Term k="context" /> — rules nest System › course › activity, deeper <Term k="override">overrides</Term> win.</p>
+        <p>The Permission Checker tab shows the whole decision, gate by gate, with evidence. That screen is the project.</p>
+      </PageIntro>
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
       {tab === "Roles" && <CapabilityEditor />}
       {tab === "Assignments" && <AssignRoleForm />}

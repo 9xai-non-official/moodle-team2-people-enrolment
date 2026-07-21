@@ -1,5 +1,6 @@
 // Demos — the Thursday-demo control room. A hub of the hard cases that live on
 // other pages, plus HC-2 (the one with no home elsewhere) run live below.
+import PageIntro from "../components/common/PageIntro";
 import HardCaseCard from "../components/demos/HardCaseCard";
 import HC2DropReturn from "../components/demos/HC2DropReturn";
 
@@ -30,6 +31,7 @@ export default function DemosPage({ onNavigate }) {
   return (
     <div>
       <h1>Hard-case demos</h1>
+      <PageIntro line="The five hard cases from the brief — each proving a rule Moodle never wrote down." />
       <p className="muted">
         Each card jumps to where that hard case already lives. HC-2 runs live
         below.

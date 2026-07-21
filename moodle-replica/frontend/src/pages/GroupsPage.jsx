@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
 import CourseModeChip from "../components/common/CourseModeChip";
+import PageIntro from "../components/common/PageIntro";
+import Term from "../components/common/Term";
 import Tabs from "../components/common/Tabs";
 import GroupsBoard from "../components/groups/GroupsBoard";
 import GroupingPanel from "../components/groups/GroupingPanel";
@@ -20,6 +22,9 @@ export default function GroupsPage() {
   return (
     <div>
       <h1>Groups</h1>
+      <PageIntro line={<>Partitions inside one course: <Term k="group">groups</Term>, <Term k="grouping">groupings</Term>, and who can see whom.</>}>
+        <p>A <Term k="group" /> holds people; a <Term k="grouping" /> holds groups. Activities restrict themselves to groupings. The <Term k="group mode" /> decides isolation — and when a course FORCES it, per-activity settings are silently ignored (the highlighted rows).</p>
+      </PageIntro>
       <div className="form-row">
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} autoSelectFirst />

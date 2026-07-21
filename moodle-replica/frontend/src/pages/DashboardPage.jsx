@@ -5,6 +5,8 @@ import { apiGet } from "../api";
 import { fetchOverview } from "../lib/progressApi";
 import { useActingUser } from "../context/ActingUser";
 import Badge from "../components/common/Badge";
+import PageIntro from "../components/common/PageIntro";
+import { PERSONAS, personaLabel } from "../lib/personas";
 
 const SECTIONS = ["Enrolment", "Roles", "Groups", "Progress"];
 
@@ -22,7 +24,7 @@ function ProgressBar({ percent }) {
 }
 
 export default function DashboardPage({ onNavigate }) {
-  const { actingUser } = useActingUser();
+  const { actingUser, users, setActingUserId } = useActingUser();
   const [stats, setStats] = useState(null);
   const [statsError, setStatsError] = useState(null);
   const [overview, setOverview] = useState([]);
@@ -44,6 +46,7 @@ export default function DashboardPage({ onNavigate }) {
   return (
     <div>
       <h1>Dashboard</h1>
+      <PageIntro line="The overview: counts, your progress, and who you can be." />
 
       {statsError && <div className="error-banner">{statsError}</div>}
       <div className="grid-cards">
@@ -54,6 +57,31 @@ export default function DashboardPage({ onNavigate }) {
           </div>
         ))}
       </div>
+
+      <h2>Try being somebody</h2>
+      <div className="form-row persona-chips">
+        {users
+          .filter((u) => PERSONAS[u.username])
+          .map((u) => (
+            <span
+              key={u.id}
+              className="chip"
+              title={PERSONAS[u.username].blurb}
+              onClick={() => setActingUserId(u.id)}
+              style={
+                actingUser?.id === u.id
+                  ? { outline: "2px solid #1a73e8" }
+                  : undefined
+              }
+            >
+              {personaLabel(u.username)}
+            </span>
+          ))}
+      </div>
+      <p className="muted">
+        Everything in this app depends on who you are — switch and watch pages
+        change.
+      </p>
 
       <h2>My progress {actingUser && <small>— {actingUser.full_name}</small>}</h2>
       {overviewError && <div className="error-banner">{overviewError}</div>}
