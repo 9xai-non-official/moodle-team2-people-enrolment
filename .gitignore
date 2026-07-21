@@ -6,5 +6,13 @@ node_modules/
 dist/
 build/
 .env
+.env.local
+.env.*.local
 .DS_Store
 *.log
+
+# Secrets must never be committed. Real values live in a local .env (see .env.example)
+# or are shared via a private channel — not in the repo.
+TEAM_CREDENTIALS.md
+secrets.*
+*.key
