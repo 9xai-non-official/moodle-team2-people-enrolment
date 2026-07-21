@@ -3,7 +3,7 @@
 Four Days Inside Moodle · HTU · 2026-07-20 → 2026-07-23
 
 **Area:** how a person gets into a course, and what they're allowed to do once they're there.
-**Target under investigation:** Moodle **5.3dev** (Build 20260605, `MATURITY_ALPHA`) — see [open-questions.md](open-questions.md) Q4 for why, and how we mitigate it.
+**Target under investigation:** Moodle **5.3dev** (Build 20260605, `MATURITY_ALPHA`) — see [open-questions.md](docs/open-questions.md) Q4 for why, and how we mitigate it.
 **Stack:** FastAPI (Python) + React (TypeScript). No PHP. Moodle is read, never modified.
 
 ## Team
@@ -33,14 +33,14 @@ the reasoning exposed rather than hidden. If only one thing works on Thursday, i
 
 | File | What it is | Status |
 |---|---|---|
-| [my-design.md](my-design.md) | Monday design from scratch + Wednesday comparison | 🟡 Part 1 in progress |
-| [rules-catalogue.md](rules-catalogue.md) | The rules, each with evidence | 🔴 0 / 50 |
-| [classification.md](classification.md) | Each rule: essential / accidental / obsolete | ⚪ not started |
-| [how-moodle-works.md](how-moodle-works.md) | The model, written so an outsider could build from it | ⚪ not started |
+| [my-design.md](docs/my-design.md) | Monday design from scratch + Wednesday comparison | 🟡 Part 1 in progress |
+| [rules-catalogue.md](docs/rules-catalogue.md) | The rules, each with evidence | 🔴 0 / 50 |
+| [classification.md](docs/classification.md) | Each rule: essential / accidental / obsolete | ⚪ not started |
+| [how-moodle-works.md](docs/how-moodle-works.md) | The model, written so an outsider could build from it | ⚪ not started |
 | [schema.sql](schema.sql) | The tables that matter, annotated | ⚪ not started |
-| [extraction.md](extraction.md) | How we found things — method, dead ends, what we'd redo | ⚪ not started |
-| [what-didnt-survive.md](what-didnt-survive.md) | What we couldn't extract, and honestly why | ⚪ not started |
-| [open-questions.md](open-questions.md) | Unknowns, tagged by who can answer | 🟢 seeded, 2 blockers |
+| [extraction.md](docs/extraction.md) | How we found things — method, dead ends, what we'd redo | ⚪ not started |
+| [what-didnt-survive.md](docs/what-didnt-survive.md) | What we couldn't extract, and honestly why | ⚪ not started |
+| [open-questions.md](docs/open-questions.md) | Unknowns, tagged by who can answer | 🟢 seeded, 2 blockers |
 | `api.yaml` | OpenAPI spec — generated free by FastAPI, don't hand-write | ⚪ not started |
 | `backend/` | FastAPI | ⚪ not started |
 | `frontend/` | React | ⚪ not started |
@@ -72,7 +72,7 @@ the reasoning exposed rather than hidden. If only one thing works on Thursday, i
 ## The traps
 
 - Paper design **before** opening Moodle. Once you've seen their design you can't un-see it.
-- Use the **messy** course. Clean test data hides the problems and breaks Thursday. ⚠️ *We don't have it yet — see [open-questions.md](open-questions.md) Q1.*
+- Use the **messy** course. Clean test data hides the problems and breaks Thursday. ⚠️ *We don't have it yet — see [open-questions.md](docs/open-questions.md) Q1.*
 - Connect to other teams **Wednesday**. Even hardcoded counts. Thursday morning is too late.
 - One thing working completely > five half-working. Don't polish CSS.
 - Broken by Thursday lunch? Write down *why*, honestly. Worth more than a demo that dodges the hard case.
@@ -104,4 +104,4 @@ so no password is stored in this repo:
 
 > ⚠️ **The local site is a blank demo install** — 2 courses, 1 real user, **0 groups**. Four of the
 > five hard cases cannot be run on it. We are blocked on the organiser's course data:
-> [open-questions.md](open-questions.md) Q1.
+> [open-questions.md](docs/open-questions.md) Q1.
