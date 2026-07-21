@@ -1,6 +1,7 @@
 // Groups (task 06 §4.4): pick a course, then Groups / Groupings / Activity
 // policy / Scope check. Every panel fetches on its own; refusals show verbatim.
 import { useState } from "react";
+import { useSelectedCourse } from "../context/SelectedCourse";
 import CourseSelect from "../components/common/CourseSelect";
 import Tabs from "../components/common/Tabs";
 import GroupsBoard from "../components/groups/GroupsBoard";
@@ -11,7 +12,7 @@ import ScopeCheckPanel from "../components/groups/ScopeCheckPanel";
 const TABS = ["Groups", "Groupings", "Activity policy", "Scope check"];
 
 export default function GroupsPage() {
-  const [courseId, setCourseId] = useState(null);
+  const { courseId, setCourseId } = useSelectedCourse();
   const [tab, setTab] = useState(TABS[0]);
 
   return (

@@ -2,6 +2,7 @@
 // API health recap + links into the four sections.
 import { useEffect, useState } from "react";
 import { apiGet } from "../api";
+import { fetchOverview } from "../lib/progressApi";
 import { useActingUser } from "../context/ActingUser";
 import Badge from "../components/common/Badge";
 
@@ -35,8 +36,8 @@ export default function DashboardPage({ onNavigate }) {
     if (!actingUser) return;
     setOverview([]);
     setOverviewError(null);
-    apiGet(`/api/progress/users/${actingUser.id}/overview`)
-      .then(setOverview)
+    fetchOverview(actingUser.id)
+      .then(({ rows }) => setOverview(rows))
       .catch((e) => setOverviewError(e.message));
   }, [actingUser]);
 

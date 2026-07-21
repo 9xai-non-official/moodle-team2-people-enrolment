@@ -2,7 +2,8 @@
 // GET /api/progress/users/{id}/overview. Percent, exclusion and self-criterion
 // all come from the API; this only renders and fires self-complete.
 import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../../api";
+import { apiPost } from "../../api";
+import { fetchOverview } from "../../lib/progressApi";
 import { ApiError } from "../../errors";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
@@ -35,8 +36,8 @@ export default function MyProgress() {
     if (!userId) return;
     setLoading(true);
     setError(null);
-    apiGet(`/api/progress/users/${userId}/overview`)
-      .then(setRows)
+    fetchOverview(userId)
+      .then(({ rows: r }) => setRows(r))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [userId, reloadKey]);
@@ -46,6 +47,18 @@ export default function MyProgress() {
     try {
       await apiPost(`/api/progress/courses/${courseId}/self-complete`, { user_id: userId });
       setReloadKey((k) => k + 1); // refetch — no optimistic UI
+    } catch (e) {
+      if (e instanceof ApiError && e.reasons.length) setRefusal(e.reasons);
+      else setError(e.message);
+    }
+  }
+
+  // Live-backend model (Mahdi): manual completion via POST /api/progress/complete.
+  async function manualComplete(courseId) {
+    setRefusal(null);
+    try {
+      await apiPost("/api/progress/complete", { user_id: userId, course_id: courseId });
+      setReloadKey((k) => k + 1);
     } catch (e) {
       if (e instanceof ApiError && e.reasons.length) setRefusal(e.reasons);
       else setError(e.message);
@@ -86,6 +99,15 @@ export default function MyProgress() {
                 onClick={() => selfComplete(row.course.id)}
               >
                 Complete course
+              </button>
+            )}
+            {row.manual_completable && !row.completed && (
+              <button
+                className="btn"
+                style={{ marginTop: "0.5rem" }}
+                onClick={() => manualComplete(row.course.id)}
+              >
+                Mark complete (manual)
               </button>
             )}
           </div>
