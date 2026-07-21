@@ -98,6 +98,20 @@ export default function CapabilityEditor() {
   return (
     <div>
       <div className="form-row">
+        {roles.map((r) => (
+          <span
+            className="chip"
+            key={r.id}
+            style={roleId === r.id ? { outline: "2px solid #1a73e8" } : undefined}
+            title={`archetype: ${r.archetype ?? "none"} — what 'reset to defaults' resets to`}
+            onClick={() => setRoleId(r.id)}
+          >
+            {r.short_name ?? r.shortname}
+            {r.archetype && <span className="muted"> ({r.archetype})</span>}
+          </span>
+        ))}
+      </div>
+      <div className="form-row">
         <label>Role</label>
         <select
           className="select"

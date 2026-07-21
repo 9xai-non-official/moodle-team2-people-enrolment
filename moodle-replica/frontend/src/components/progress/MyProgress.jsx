@@ -91,7 +91,19 @@ export default function MyProgress() {
               total={row.total}
               excluded={row.excluded}
             />
-            {row.completed_at && <div className="muted">completed {row.completed_at}</div>}
+            {row.percent !== null && row.percent !== undefined && (
+              <div className="muted">
+                {row.counted}/{row.total} criteria met
+                {row.excluded > 0 && ` · ${row.excluded} hidden, excluded from %`}
+              </div>
+            )}
+            {row.completed_at && (
+              <div>
+                <Badge variant="green" title={String(row.completed_at)}>
+                  ✓ completed {String(row.completed_at).slice(0, 10)}
+                </Badge>
+              </div>
+            )}
             {row.has_self_criterion && (
               <button
                 className="btn"

@@ -17,13 +17,14 @@ export default function HistoryTimeline() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  function run() {
+  function run(fromOverride) {
     setLoading(true);
     setError(null);
+    const effFrom = fromOverride !== undefined ? fromOverride : from;
     const params = new URLSearchParams();
     if (userId) params.set("user_id", userId);
     if (courseId) params.set("course_id", courseId);
-    if (from) params.set("from", from);
+    if (effFrom) params.set("from", effFrom);
     if (to) params.set("to", to);
     const qs = params.toString();
     apiGet(`/api/progress/snapshots${qs ? `?${qs}` : ""}`)
@@ -48,9 +49,30 @@ export default function HistoryTimeline() {
         <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         <label>To</label>
         <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        <button className="btn btn--primary" onClick={run}>
+        <button className="btn btn--primary" onClick={() => run()}>
           Search
         </button>
+      </div>
+      <div className="form-row">
+        {[
+          { label: "All time", years: null },
+          { label: "Past year", years: 1 },
+          { label: "Past 3 years", years: 3 },
+        ].map((r) => (
+          <button
+            key={r.label}
+            className="btn"
+            onClick={() => {
+              const f = r.years
+                ? new Date(Date.now() - r.years * 365 * 86400e3).toISOString().slice(0, 10)
+                : "";
+              setFrom(f);
+              run(f);
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
       </div>
       <p className="muted">
         tip: query without a user to see all snapshots — including users hidden from the directory
@@ -68,7 +90,10 @@ export default function HistoryTimeline() {
         snaps.map((s) => (
           <div className="panel" key={s.id}>
             <div className="panel__title">
-              {s.taken_at} — {s.course.short_name}
+              {s.taken_at} ({(() => {
+                const y = (Date.now() - new Date(s.taken_at)) / (365 * 86400e3);
+                return y < 1 ? "this year" : `${Math.round(y)}y ago`;
+              })()}) — {s.course.short_name}
               {s.course.deleted && (
                 <Badge variant="amber" title="served from snapshots">
                   deleted — served from snapshots
