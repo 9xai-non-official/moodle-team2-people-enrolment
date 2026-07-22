@@ -120,32 +120,32 @@ export const routes = [
           ],
         });
       }
+      // GRP-036 / R-DUP-ADD: duplicate-add is a SILENT no-op (Moodle parity),
+      // not a 409 — the backend does on-conflict-do-nothing. (mock retired to
+      // match real behaviour — T2-GRP-003 §7 FALSE_SIMILARITY fix.)
       if (GROUP_MEMBERS.some((mm) => mm.group_id === groupId && mm.user_id === userId)) {
-        throw new ApiError(409, { reasons: [`already a member of ${group.name}`] });
+        return { ok: true, group_id: groupId, user_id: userId, component: "" };
       }
-      const row = { group_id: groupId, user_id: userId, component: "", item_id: 0 };
-      GROUP_MEMBERS.push(row);
-      return row;
+      // V3: provenance is server-set; the client body carries only {user_id}.
+      GROUP_MEMBERS.push({ group_id: groupId, user_id: userId, component: "", item_id: 0 });
+      return { ok: true, group_id: groupId, user_id: userId, component: "" };
     },
   },
   {
     method: "DELETE",
     pattern: /^\/api\/groups\/(\d+)\/members\/(\d+)$/,
-    handler: (m, body, query) => {
+    handler: (m) => {
       const groupId = Number(m[1]);
       const userId = Number(m[2]);
       const idx = GROUP_MEMBERS.findIndex(
         (mm) => mm.group_id === groupId && mm.user_id === userId,
       );
-      if (idx < 0) throw new ApiError(404, { detail: "not a member of this group" });
-      const row = GROUP_MEMBERS[idx];
-      // machine-owned rows come back on the next enrolment sync — refuse unless forced.
-      if (row.component !== "" && query.force !== "1") {
-        const reason = `membership owned by '${row.component}' (sync) — removing it by hand will be recreated on next sync`;
-        throw new ApiError(409, { reason, machine_owned: true, reasons: [reason] });
-      }
+      // T2-GRP-003 default-allow: a manager removes a manual OR component-owned
+      // row; non-member remove is idempotent success (no machine_owned/409).
+      if (idx < 0) return { ok: true, idempotent: true };
+      const removed = GROUP_MEMBERS[idx].component || null;
       GROUP_MEMBERS.splice(idx, 1);
-      return null; // 204
+      return { ok: true, removed_component: removed };
     },
   },
   {

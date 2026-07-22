@@ -5,7 +5,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPost, apiDelete } from "../../api";
 import { fetchGroupsBoard, deleteGroup as apiDeleteGroup } from "../../lib/groupsApi";
-import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import UserSelect from "../common/UserSelect";
 import ReasonList from "../common/ReasonList";
@@ -27,12 +26,11 @@ const PROVENANCE = {
 };
 
 export default function GroupsBoard({ courseId }) {
-  const { actingUser } = useActingUser();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [addSel, setAddSel] = useState({}); // groupId -> selected user id
-  const [notice, setNotice] = useState(null); // { groupId, reasons, retry? }
+  const [notice, setNotice] = useState(null); // { groupId, reasons }
   const [openAdd, setOpenAdd] = useState(null); // groupId whose add-member row is open
   const addRef = useRef(null);
 
@@ -59,10 +57,10 @@ export default function GroupsBoard({ courseId }) {
     if (!userId) return;
     setNotice(null);
     try {
-      await apiPost(`/api/groups/${groupId}/members`, {
-        user_id: userId,
-        actor_id: actingUser?.id,
-      });
+      // T2-GRP-003: the body carries ONLY {user_id}. The principal is the
+      // session user (X-Acting-User header, set globally in api.js); the
+      // server sets provenance and cannot be told a component by the client.
+      await apiPost(`/api/groups/${groupId}/members`, { user_id: userId });
       setAddSel((s) => ({ ...s, [groupId]: null }));
       setOpenAdd(null);
       load();
@@ -87,19 +85,18 @@ export default function GroupsBoard({ courseId }) {
     }
   }
 
-  async function removeMember(groupId, userId, force = false) {
+  async function removeMember(groupId, userId) {
+    // T2-GRP-003: removal is default-allow for a manager (Moodle
+    // group/lib.php:184-185) — a manager may remove a manual OR a
+    // component-owned row directly. The old machine_owned/409 + Force-remove
+    // dance is gone (it was the inverse of Moodle); the backend now succeeds
+    // and records the source in the audit log.
     setNotice(null);
     try {
-      await apiDelete(
-        `/api/groups/${groupId}/members/${userId}?actor_id=${actingUser?.id ?? ""}${force ? "&force=1" : ""}`,
-      );
+      await apiDelete(`/api/groups/${groupId}/members/${userId}`);
       load();
     } catch (e) {
-      setNotice({
-        groupId,
-        reasons: e.reasons?.length ? e.reasons : [e.message],
-        retry: e.payload?.machine_owned ? () => removeMember(groupId, userId, true) : undefined,
-      });
+      setNotice({ groupId, reasons: e.reasons?.length ? e.reasons : [e.message] });
     }
   }
 
@@ -195,14 +192,7 @@ export default function GroupsBoard({ courseId }) {
           )}
 
           {notice?.groupId === g.id && (
-            <>
-              <ReasonList reasons={notice.reasons} tone="error" title="Refused" />
-              {notice.retry && (
-                <button className="btn btn--danger" onClick={notice.retry}>
-                  Force remove
-                </button>
-              )}
-            </>
+            <ReasonList reasons={notice.reasons} tone="error" title="Refused" />
           )}
         </div>
       ))}

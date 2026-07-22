@@ -3,6 +3,7 @@
 // is how the demo swaps between admin1 / teacher.a / ta.a / student.a / …
 import { createContext, useContext, useEffect, useState } from "react";
 import { cachedGet } from "../lib/catalog";
+import { setApiActingUser } from "../api";
 
 const ActingUserContext = createContext({
   users: [],
@@ -26,6 +27,7 @@ export function ActingUserProvider({ children }) {
   }, []);
 
   const actingUser = users.find((u) => u.id === actingUserId) || null;
+  setApiActingUser(actingUser?.id ?? null); // keep the API principal header in sync
 
   return (
     <ActingUserContext.Provider
