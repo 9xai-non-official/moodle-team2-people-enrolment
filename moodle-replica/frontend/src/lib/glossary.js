@@ -34,4 +34,16 @@ export const GLOSSARY = {
     "A record that work happened. It survives unenrolment and even course deletion — the past doesn't get rewritten.",
   criteria:
     "The checklist that defines 'course complete' — activities to finish, aggregated by ALL or ANY.",
+  "self enrolment":
+    "Signing yourself into a course, sometimes gated by a key the teacher hands out.",
+  "enrolment key":
+    "The password of a course's self-enrolment door — wrong key, no entry.",
+  "submission statement":
+    "The 'this is my own work' declaration — no tick, no hand-in.",
+  "non-editing teacher":
+    "The grade-only role: may view and mark students' work, may never add or change activities.",
+  "course request":
+    "A teacher can't create courses — they ask, a manager approves, and the requester becomes the new course's teacher.",
+  "manual marking":
+    "Essay answers wait for a human: the quiz total stays hidden until a teacher scores them.",
 };
