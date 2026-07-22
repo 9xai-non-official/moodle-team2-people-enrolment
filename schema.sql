@@ -136,6 +136,27 @@ end $$;
 create trigger context_path before insert or update of parent_id on context
     for each row execute function trg_context_path();
 
+-- Reparenting fix: the BEFORE trigger above recomputes only the row that moved.
+-- When a node with children is reparented, every DESCENDANT's derived path/depth
+-- would otherwise go stale (and the resolver walks `path`, so that is a
+-- correctness bug). This AFTER trigger rewrites the whole subtree in one
+-- statement: swap the moved node's old path-prefix for its new one and shift
+-- depth by the delta. It updates only path/depth (never parent_id), so it does
+-- not re-fire itself.
+create or replace function trg_context_reparent() returns trigger
+language plpgsql as $$
+begin
+    if new.path is distinct from old.path then
+        update context
+           set path  = new.path || substring(path from length(old.path) + 1),
+               depth = depth + (new.depth - old.depth)
+         where path like old.path || '/%';
+    end if;
+    return null;
+end $$;
+create trigger context_reparent after update of parent_id on context
+    for each row execute function trg_context_reparent();
+
 -- ---------------------------------------------------------------------------
 -- role  (Moodle: role)
 -- WHY: a named bundle of capability settings. The archetype is what "reset
@@ -400,6 +421,26 @@ create table audit_log (
 );
 create index idx_audit_affected on audit_log(affected_id, created_at);
 
+-- ---------------------------------------------------------------------------
+-- permission_decision  (the Decision Log — Team 2 / Khaled)
+-- WHY: every /api/permissions/check verdict is logged here for the demo's
+-- Decision Log tab and for after-the-fact "why was this allowed/denied?". This
+-- is the SINK the application writes to; the app never creates it at runtime
+-- (schema is owned here, not authored from request handling). Append-only,
+-- best-effort — a missing table never breaks a verdict.
+-- ---------------------------------------------------------------------------
+create table permission_decision (
+    id          bigint generated always as identity primary key,
+    actor_id    bigint,
+    capability  varchar(255),
+    context_id  bigint,
+    target_id   bigint,
+    allowed     boolean not null,
+    reasons     jsonb not null default '{}'::jsonb,
+    decided_at  timestamptz not null default now()
+);
+create index idx_decision_actor on permission_decision(actor_id, decided_at);
+
 -- ===========================================================================
 -- Views — the questions the app asks constantly
 -- ===========================================================================
@@ -555,3 +596,4 @@ alter table course_completion   enable row level security;
 alter table activity_completion enable row level security;
 alter table user_last_access    enable row level security;
 alter table audit_log           enable row level security;
+alter table permission_decision enable row level security;
