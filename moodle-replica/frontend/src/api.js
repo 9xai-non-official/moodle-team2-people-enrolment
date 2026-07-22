@@ -8,57 +8,71 @@ import { mockRequest } from "./mocks";
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8010";
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "1";
 
-// Session credential (WP04): the backend derives identity from this verified
-// token, never from a request field. Set at sign-in (see ActingUser), cleared at
-// sign-out. When absent, no header is sent — unrelated (non-roles) endpoints are
-// unaffected; the hardened roles/permissions endpoints answer 401 until sign-in.
-const TOKEN_KEY = "mrToken";
-export function setAuthToken(token) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch { /* storage unavailable — token simply won't persist */ }
+// Principal header (interim identity assertion — see backend app/deps.py).
+// ActingUser context keeps this in sync; the server validates the account
+// and makes every capability decision itself.
+let actingUserId = null;
+export function setApiActingUser(id) {
+  actingUserId = id;
 }
-export function getAuthToken() {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+
+// Global activity + write signals: the shell renders a thin top progress bar
+// while anything is in flight and a toast after successful writes — zero
+// per-component wiring, so no fetch can feel like a hang and no save can go
+// unacknowledged.
+let inflight = 0;
+function signalActivity(delta) {
+  inflight = Math.max(0, inflight + delta);
+  window.dispatchEvent(new CustomEvent("api-activity", { detail: inflight }));
+}
+function signalWrite(method, path) {
+  window.dispatchEvent(new CustomEvent("api-write", { detail: { method, path } }));
 }
 
 async function request(method, path, body) {
   if (USE_MOCKS) {
-    const hit = await mockRequest(method, path, body);
-    if (hit) return hit.data; // mock 403/409s throw ApiError from the handler
-  }
-
-  const headers = body !== undefined ? { "Content-Type": "application/json" } : {};
-  const token = getAuthToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields.
-    let payload = null;
+    signalActivity(+1);
     try {
-      payload = await res.json();
-    } catch {
-      payload = { detail: res.statusText };
+      const hit = await mockRequest(method, path, body);
+      if (hit) {
+        if (method !== "GET") signalWrite(method, path);
+        return hit.data; // mock 403/409s throw ApiError from the handler
+      }
+    } finally {
+      signalActivity(-1);
     }
-    throw new ApiError(res.status, payload);
   }
-  if (res.status === 204) return null;
-  return res.json();
+
+  signalActivity(+1);
+  try {
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (actingUserId != null) headers["X-Acting-User"] = String(actingUserId);
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields.
+      let payload = null;
+      try {
+        payload = await res.json();
+      } catch {
+        payload = { detail: res.statusText };
+      }
+      throw new ApiError(res.status, payload, `${method} ${path.split("?")[0]}`);
+    }
+    if (method !== "GET") signalWrite(method, path);
+    if (res.status === 204) return null;
+    return res.json();
+  } finally {
+    signalActivity(-1);
+  }
 }
 
 export const apiGet = (path) => request("GET", path);
 export const apiPost = (path, body) => request("POST", path, body ?? {});
-export const apiPut = (path, body) => request("PUT", path, body ?? {});
 export const apiPatch = (path, body) => request("PATCH", path, body ?? {});
 export const apiDelete = (path) => request("DELETE", path);
 

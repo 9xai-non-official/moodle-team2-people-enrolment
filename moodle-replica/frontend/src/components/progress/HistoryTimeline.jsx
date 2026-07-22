@@ -16,14 +16,16 @@ export default function HistoryTimeline() {
   const [snaps, setSnaps] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [activeRange, setActiveRange] = useState("All time");
 
-  function run() {
+  function run(fromOverride) {
     setLoading(true);
     setError(null);
+    const effFrom = fromOverride !== undefined ? fromOverride : from;
     const params = new URLSearchParams();
     if (userId) params.set("user_id", userId);
     if (courseId) params.set("course_id", courseId);
-    if (from) params.set("from", from);
+    if (effFrom) params.set("from", effFrom);
     if (to) params.set("to", to);
     const qs = params.toString();
     apiGet(`/api/progress/snapshots${qs ? `?${qs}` : ""}`)
@@ -45,12 +47,50 @@ export default function HistoryTimeline() {
         <label>Course</label>
         <CourseSelect value={courseId} onChange={setCourseId} includeDeleted autoSelectFirst={false} />
         <label>From</label>
-        <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <input
+          className="input"
+          type="date"
+          value={from}
+          onChange={(e) => {
+            setFrom(e.target.value);
+            setActiveRange(null);
+          }}
+        />
         <label>To</label>
-        <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        <button className="btn btn--primary" onClick={run}>
+        <input
+          className="input"
+          type="date"
+          value={to}
+          onChange={(e) => {
+            setTo(e.target.value);
+            setActiveRange(null);
+          }}
+        />
+        <button className="btn btn--primary" onClick={() => run()}>
           Search
         </button>
+      </div>
+      <div className="form-row">
+        {[
+          { label: "All time", years: null },
+          { label: "Past year", years: 1 },
+          { label: "Past 3 years", years: 3 },
+        ].map((r) => (
+          <button
+            key={r.label}
+            className={`btn ${activeRange === r.label ? "btn--primary" : ""}`}
+            onClick={() => {
+              const f = r.years
+                ? new Date(Date.now() - r.years * 365 * 86400e3).toISOString().slice(0, 10)
+                : "";
+              setFrom(f);
+              setActiveRange(r.label);
+              run(f);
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
       </div>
       <p className="muted">
         tip: query without a user to see all snapshots — including users hidden from the directory
@@ -60,19 +100,27 @@ export default function HistoryTimeline() {
       {loading && <p className="muted">Loading…</p>}
       {error && <div className="error-banner">{error}</div>}
       {!loading && !error && snaps && snaps.length === 0 && (
-        <p className="muted">No snapshots for this query.</p>
+        <p className="muted">
+          No snapshots for this query — clear the filters ("All time", no user)
+          to see everything, including deleted-course history.
+        </p>
       )}
       {!loading &&
         !error &&
         snaps &&
-        snaps.map((s) => (
-          <div className="panel" key={s.id}>
+        snaps.map((s, i) => (
+          <div className="panel progress-snap" key={s.id} style={{ "--i": Math.min(i, 8) }}>
             <div className="panel__title">
-              {s.taken_at} — {s.course.short_name}
+              {s.taken_at} ({(() => {
+                const y = (Date.now() - new Date(s.taken_at)) / (365 * 86400e3);
+                return y < 1 ? "this year" : `${Math.round(y)}y ago`;
+              })()}) — {s.course.short_name}
               {s.course.deleted && (
-                <Badge variant="amber" title="served from snapshots">
-                  deleted — served from snapshots
-                </Badge>
+                <span className="progress-deleted-flag">
+                  <Badge variant="amber" title="served from snapshots">
+                    deleted — served from snapshots
+                  </Badge>
+                </span>
               )}
             </div>
             <div className="bar" style={{ maxWidth: "260px" }}>

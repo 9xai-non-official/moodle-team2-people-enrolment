@@ -1,6 +1,5 @@
 // Decision Log: every permission check, newest first. A row click replays
-// the stored decision — its CheckResponse verdict, reasons, and capability
-// resolution — in a modal.
+// the stored decision — its full gate pipeline and reasons — in a modal.
 import { useEffect, useState } from "react";
 import { apiGet } from "../../api";
 import DataTable from "../common/DataTable";
@@ -8,7 +7,20 @@ import Modal from "../common/Modal";
 import Badge from "../common/Badge";
 import ReasonList from "../common/ReasonList";
 
-export default function DecisionLog() {
+// Relative age of a timestamp, computed at render — presentation only.
+function relTime(iso) {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+export default function DecisionLog({ onReplay }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -16,90 +28,87 @@ export default function DecisionLog() {
 
   useEffect(() => {
     setLoading(true);
-    apiGet("/api/permissions/decisions?limit=100")
+    apiGet("/api/permissions/decisions")
       .then(setRows)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
 
   const columns = [
-    { key: "actor", label: "Actor", render: (r) => r.actor_id },
+    { key: "actor", label: "Actor", render: (r) => r.actor.full_name },
     { key: "capability", label: "Capability" },
-    { key: "context", label: "Context", render: (r) => r.context_id },
+    { key: "context_label", label: "Context" },
     {
       key: "verdict",
       label: "Verdict",
       render: (r) => (
-        <Badge variant={r.allowed ? "green" : "red"}>{r.allowed ? "ALLOW" : "DENY"}</Badge>
+        <Badge variant={r.verdict === "allowed" ? "green" : "red"}>{r.verdict}</Badge>
       ),
     },
     {
-      key: "when",
+      key: "created_at",
       label: "When",
-      render: (r) => (r.decided_at ? new Date(r.decided_at).toLocaleString() : "—"),
+      render: (r) => (
+        <span title={new Date(r.created_at).toLocaleString()}>{relTime(r.created_at)}</span>
+      ),
+    },
+    {
+      key: "replay",
+      label: "",
+      render: (r) =>
+        onReplay && (
+          <button
+            className="btn"
+            title="Re-run this check in the Permission Checker with the same inputs"
+            onClick={(e) => {
+              e.stopPropagation(); // row click opens the modal; this jumps tabs
+              onReplay(r);
+            }}
+          >
+            Replay
+          </button>
+        ),
     },
   ];
 
-  const reasons = selected?.reasons ?? null;
-  const capValues = Object.entries(reasons?.capability_values || {});
-
   return (
     <div>
-      <p className="muted">Every permission check is logged here. Click a row to replay its decision.</p>
+      <p className="muted">Every permission check is logged here. Click a row to replay its gates.</p>
       <DataTable
         columns={columns}
         rows={rows}
         loading={loading}
         error={error}
         empty="No checks run yet — try the Permission Checker."
-        rowKey={(r) => r.id}
         onRowClick={setSelected}
       />
       <Modal
         open={!!selected}
-        title={selected ? `${selected.capability} — ${selected.allowed ? "ALLOW" : "DENY"}` : ""}
+        title={selected ? `${selected.capability} — ${selected.verdict}` : ""}
         onClose={() => setSelected(null)}
       >
         {selected && (
           <div>
-            {reasons ? (
-              <>
-                <div
-                  className={`verdict-banner verdict-banner--${
-                    reasons.decision === "ALLOW" ? "allowed" : "denied"
-                  }`}
-                >
-                  {reasons.decision}
+            <div className={`verdict-banner verdict-banner--${selected.verdict}`}>
+              {selected.verdict.toUpperCase()}
+            </div>
+            {selected.gates.map((g) => (
+              <div key={g.gate} className={`gate-row gate-row--${g.passed ? "pass" : "fail"}`}>
+                <div className="gate-row__name">{g.gate}</div>
+                <div>
+                  {g.evidence.map((ev, i) => (
+                    <div key={i} className="gate-row__evidence">
+                      {ev}
+                    </div>
+                  ))}
                 </div>
-                <ReasonList
-                  reasons={reasons?.supporting_reasons || []}
-                  tone="ok"
-                  title="Supporting"
-                />
-                <ReasonList
-                  reasons={reasons?.blocking_reasons || []}
-                  tone="error"
-                  title="Blocking"
-                />
-                {capValues.length > 0 && (
-                  <div className="reason-list reason-list--neutral">
-                    <div className="reason-list__title">Capability resolution</div>
-                    <ul>
-                      {capValues.map(([role, v]) => (
-                        <li key={role}>
-                          {role} → {v?.value ?? "not set"}
-                          {v?.decided_at && (
-                            <div className="reason-list__evidence">{v.decided_at}</div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="muted">No stored decision detail for this check.</p>
-            )}
+              </div>
+            ))}
+            <ReasonList
+              reasons={selected.reasons}
+              tone={selected.verdict === "allowed" ? "ok" : "error"}
+              title="Reasons"
+            />
           </div>
         )}
       </Modal>

@@ -33,14 +33,12 @@ insert into capability (name, cap_type, min_context_level, component, risks) val
   ('group:manage',             'write', 'course',   'core',        '{}'),
   ('role:assign',              'write', 'course',   'core',        '{spam,personal}'),
   ('role:override',            'write', 'course',   'core',        '{}'),
-  ('role:manage',              'write', 'system',   'core',        '{config,personal}'),  -- create/clone role DEFINITIONS (Moodle: moodle/role:manage)
   ('enrol:manual',             'write', 'course',   'enrol_manual','{}'),
   ('enrol:unenrol',            'write', 'course',   'enrol_manual','{dataloss}'),
   ('enrol:selfunenrol',        'write', 'course',   'enrol_self',  '{}'),
   ('activity:view',            'read',  'activity', 'core',        '{}'),
   ('activity:grade',           'write', 'activity', 'core',        '{}'),          -- TA marking scope, hard case #3
   ('activity:submit',          'write', 'activity', 'core',        '{}'),
-  ('completion:override',      'write', 'activity', 'core',        '{}'),          -- Moodle: moodle/completion:overrideactivitycompletion (progress T2-PRG-003)
   ('progress:viewown',         'read',  'course',   'core',        '{}'),
   ('progress:viewall',         'read',  'course',   'core',        '{personal}'),
   ('user:viewdetails',         'read',  'user',     'core',        '{personal}');
@@ -60,9 +58,7 @@ with sys as (select id from context where level = 'system'),
   ('manager','course:view','allow'), ('manager','course:viewparticipants','allow'),
   ('manager','course:viewhidden','allow'), ('manager','site:accessallgroups','allow'),
   ('manager','group:manage','allow'), ('manager','role:assign','allow'),
-  ('manager','role:override','allow'), ('manager','role:manage','allow'),
-  ('manager','completion:override','allow'),
-  ('manager','enrol:manual','allow'),
+  ('manager','role:override','allow'), ('manager','enrol:manual','allow'),
   ('manager','enrol:unenrol','allow'), ('manager','progress:viewall','allow'),
   ('manager','user:viewdetails','allow'),
   -- editing teacher
@@ -72,7 +68,6 @@ with sys as (select id from context where level = 'system'),
   ('editingteacher','role:override','allow'), ('editingteacher','enrol:manual','allow'),
   ('editingteacher','enrol:unenrol','allow'), ('editingteacher','activity:view','allow'),
   ('editingteacher','activity:grade','allow'), ('editingteacher','progress:viewall','allow'),
-  ('editingteacher','completion:override','allow'),  -- NOT non-editing teacher (Moodle policy)
   ('editingteacher','user:viewdetails','allow'),
   -- non-editing teacher (TA)
   ('teacher','course:view','allow'), ('teacher','course:viewparticipants','allow'),

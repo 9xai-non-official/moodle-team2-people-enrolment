@@ -2,32 +2,42 @@
 // badge + remove ×), and an add-member row. Backend refusals (403 non-enrolled,
 // 409 machine-owned) render verbatim; machine-owned rows get a Force remove.
 // No optimistic UI — every successful mutation refetches.
-import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost, apiDelete } from "../../api";
-import { useActingUser } from "../../context/ActingUser";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiPost, apiDelete } from "../../api";
+import { fetchGroupsBoard, deleteGroup as apiDeleteGroup } from "../../lib/groupsApi";
 import Badge from "../common/Badge";
 import UserSelect from "../common/UserSelect";
 import ReasonList from "../common/ReasonList";
+import GroupCreateForm from "./GroupCreateForm";
 
 // provenance: '' = added by hand; enrol_* = owned by an enrolment sync.
 const PROVENANCE = {
-  "": { label: "manual", variant: "neutral" },
-  enrol_cohort: { label: "enrol_cohort", variant: "blue" },
-  enrol_self: { label: "enrol_self", variant: "blue" },
+  "": { label: "manual", variant: "neutral", title: "added by hand" },
+  enrol_cohort: {
+    label: "enrol_cohort",
+    variant: "blue",
+    title: "created by cohort sync — machine-owned",
+  },
+  enrol_self: {
+    label: "enrol_self",
+    variant: "blue",
+    title: "created by self-enrolment — machine-owned",
+  },
 };
 
 export default function GroupsBoard({ courseId }) {
-  const { actingUser } = useActingUser();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [addSel, setAddSel] = useState({}); // groupId -> selected user id
-  const [notice, setNotice] = useState(null); // { groupId, reasons, retry? }
+  const [notice, setNotice] = useState(null); // { groupId, reasons }
+  const [openAdd, setOpenAdd] = useState(null); // groupId whose add-member row is open
+  const addRef = useRef(null);
 
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    apiGet(`/api/groups/courses/${courseId}/groups`)
+    fetchGroupsBoard(courseId)
       .then(setGroups)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -37,68 +47,124 @@ export default function GroupsBoard({ courseId }) {
     load();
   }, [load]);
 
+  // Autofocus the member picker when a group's add-member row opens (§4.4 flow).
+  useEffect(() => {
+    if (openAdd != null) addRef.current?.querySelector("select")?.focus();
+  }, [openAdd]);
+
   async function addMember(groupId) {
     const userId = addSel[groupId];
     if (!userId) return;
     setNotice(null);
     try {
-      await apiPost(`/api/groups/${groupId}/members`, {
-        user_id: userId,
-        actor_id: actingUser?.id,
-      });
+      // T2-GRP-003: the body carries ONLY {user_id}. The principal is the
+      // session user (X-Acting-User header, set globally in api.js); the
+      // server sets provenance and cannot be told a component by the client.
+      await apiPost(`/api/groups/${groupId}/members`, { user_id: userId });
       setAddSel((s) => ({ ...s, [groupId]: null }));
+      setOpenAdd(null);
       load();
     } catch (e) {
       setNotice({ groupId, reasons: e.reasons?.length ? e.reasons : [e.message] });
     }
   }
 
-  async function removeMember(groupId, userId, force = false) {
+  async function removeGroup(groupId, name, memberCount) {
+    if (
+      !window.confirm(
+        `Delete "${name}" and its ${memberCount} member${memberCount === 1 ? "" : "s"}? This removes the group and its memberships — users and enrolments untouched (GRP-001).`,
+      )
+    )
+      return;
     setNotice(null);
     try {
-      await apiDelete(
-        `/api/groups/${groupId}/members/${userId}?actor_id=${actingUser?.id ?? ""}${force ? "&force=1" : ""}`,
-      );
+      await apiDeleteGroup(groupId);
       load();
     } catch (e) {
-      setNotice({
-        groupId,
-        reasons: e.reasons?.length ? e.reasons : [e.message],
-        retry: e.payload?.machine_owned ? () => removeMember(groupId, userId, true) : undefined,
-      });
+      setNotice({ groupId, reasons: e.reasons?.length ? e.reasons : [e.message] });
     }
   }
 
-  if (loading) return <p className="muted">Loading groups…</p>;
-  if (error) return <div className="error-banner">{error}</div>;
-  if (groups.length === 0) return <p className="muted">No groups in this course.</p>;
+  async function removeMember(groupId, userId) {
+    // T2-GRP-003: removal is default-allow for a manager (Moodle
+    // group/lib.php:184-185) — a manager may remove a manual OR a
+    // component-owned row directly. The old machine_owned/409 + Force-remove
+    // dance is gone (it was the inverse of Moodle); the backend now succeeds
+    // and records the source in the audit log.
+    setNotice(null);
+    try {
+      await apiDelete(`/api/groups/${groupId}/members/${userId}`);
+      load();
+    } catch (e) {
+      setNotice({ groupId, reasons: e.reasons?.length ? e.reasons : [e.message] });
+    }
+  }
 
   return (
     <div>
-      {groups.map((g) => (
+      <GroupCreateForm courseId={courseId} onCreated={load} />
+      {loading && <p className="muted">Loading groups…</p>}
+      {error && <div className="error-banner">{error}</div>}
+      {!loading && !error && groups.length === 0 && (
+        <p className="muted">No groups in this course.</p>
+      )}
+      {!loading &&
+        !error &&
+        groups.map((g) => (
         <div className="panel" key={g.id}>
-          <div className="panel__title">
-            {g.name}
-            {g.enrolment_key && (
-              <Badge variant="amber" title="group has an enrolment key">
-                key
-              </Badge>
-            )}
-            {!g.participation && (
-              <Badge variant="grey" title="non-participation group">
-                no participation
-              </Badge>
-            )}
+          <div className="panel__title group-card__head">
+            <span className="group-card__name">
+              {g.name}
+              {g.enrolment_key && (
+                <Badge variant="amber" title="group has an enrolment key">
+                  key
+                </Badge>
+              )}
+              {!g.participation && (
+                <Badge variant="grey" title="non-participation group">
+                  no participation
+                </Badge>
+              )}
+            </span>
+            <span className="group-card__actions">
+              <button
+                className="btn"
+                onClick={() => {
+                  setNotice(null);
+                  setOpenAdd((cur) => (cur === g.id ? null : g.id));
+                }}
+              >
+                {openAdd === g.id ? "Close" : "+ Add member"}
+              </button>
+              <button
+                className="btn btn--danger"
+                onClick={() => removeGroup(g.id, g.name, g.members.length)}
+              >
+                Delete group
+              </button>
+            </span>
           </div>
 
-          <div>
+          <div className="group-members">
             {g.members.length === 0 && <span className="muted">no members</span>}
-            {g.members.map((mm) => {
+            {g.members.map((mm, i) => {
               const prov = PROVENANCE[mm.provenance] ?? PROVENANCE[""];
+              // HC-4: membership in several groups of one course is legal —
+              // count across the whole board (API data, only counted here).
+              const inGroups = groups.filter((og) =>
+                og.members.some((m) => m.user_id === mm.user_id),
+              ).length;
               return (
-                <span className="chip" key={mm.user_id}>
+                <span className="chip" key={mm.user_id} style={{ "--i": Math.min(i, 8) }}>
                   {mm.full_name}
-                  <Badge variant={prov.variant}>{prov.label}</Badge>
+                  <Badge variant={prov.variant} title={prov.title}>
+                    {prov.label}
+                  </Badge>
+                  {inGroups > 1 && (
+                    <Badge variant="amber" title="member of several groups at once — HC-4; 'separate' mode shows the union">
+                      ×{inGroups}
+                    </Badge>
+                  )}
                   <button
                     className="modal-close"
                     title="remove"
@@ -112,26 +178,21 @@ export default function GroupsBoard({ courseId }) {
             })}
           </div>
 
-          <div className="form-row">
-            <UserSelect
-              value={addSel[g.id] ?? null}
-              onChange={(v) => setAddSel((s) => ({ ...s, [g.id]: v }))}
-              placeholder="— add member —"
-            />
-            <button className="btn" onClick={() => addMember(g.id)} disabled={!addSel[g.id]}>
-              Add
-            </button>
-          </div>
+          {openAdd === g.id && (
+            <div className="form-row" ref={addRef}>
+              <UserSelect
+                value={addSel[g.id] ?? null}
+                onChange={(v) => setAddSel((s) => ({ ...s, [g.id]: v }))}
+                placeholder="— add member —"
+              />
+              <button className="btn" onClick={() => addMember(g.id)} disabled={!addSel[g.id]}>
+                Add
+              </button>
+            </div>
+          )}
 
           {notice?.groupId === g.id && (
-            <>
-              <ReasonList reasons={notice.reasons} tone="error" title="Refused" />
-              {notice.retry && (
-                <button className="btn btn--danger" onClick={notice.retry}>
-                  Force remove
-                </button>
-              )}
-            </>
+            <ReasonList reasons={notice.reasons} tone="error" title="Refused" />
           )}
         </div>
       ))}

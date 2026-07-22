@@ -20,6 +20,12 @@
   font-weight: 700;
   letter-spacing: 0.2px;
 }
+.brand__sub {
+  font-weight: 400;
+  font-size: 0.78rem;
+  opacity: 0.75;
+  margin-left: 0.5rem;
+}
 
 .api-status {
   display: flex;
@@ -123,6 +129,7 @@ h2 { font-size: 1.15rem; margin: 1.5rem 0 0.6rem; }
   padding: 0.6rem 0.8rem;
   margin: 0.5rem 0;
   font-size: 0.9rem;
+  cursor: copy;
 }
 
 .badge {
@@ -195,6 +202,7 @@ h2 { font-size: 1.15rem; margin: 1.5rem 0 0.6rem; }
   color: #1d2125;
 }
 
+.table-scroll { overflow-x: auto; }
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -335,6 +343,116 @@ tr.row--highlight { background: #fef7e0; }
 }
 .drawer__close { float: right; border: none; background: none; font-size: 1.2rem; cursor: pointer; }
 
+/* ---- UX layer: tour, glossary, intro strips, activity, toast, skeleton --- */
+.help-btn {
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-weight: 700;
+  margin-left: 0.6rem;
+}
+
+.term {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
+.page-intro {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  color: #5f6368;
+  font-size: 0.9rem;
+  margin: 0.2rem 0 0.8rem;
+}
+.page-intro__more {
+  border: none;
+  background: none;
+  color: #1a73e8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+.page-intro__body {
+  flex-basis: 100%;
+  background: #f8f9fa;
+  border-left: 3px solid #1a73e8;
+  border-radius: 0 6px 6px 0;
+  padding: 0.6rem 0.8rem;
+  line-height: 1.55;
+}
+.page-intro__body p { margin: 0.3rem 0; }
+
+.activity-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 40;
+  background: linear-gradient(90deg, #1a73e8 0%, #8ab4f8 50%, #1a73e8 100%);
+  background-size: 200% 100%;
+  animation: activity-slide 1s linear infinite;
+}
+@keyframes activity-slide {
+  from { background-position: 200% 0; }
+  to { background-position: 0 0; }
+}
+
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1d2125;
+  color: #e6f4ea;
+  padding: 0.55rem 1.1rem;
+  border-radius: 18px;
+  font-size: 0.85rem;
+  z-index: 40;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.skeleton {
+  display: inline-block;
+  width: 70%;
+  min-width: 3rem;
+  height: 0.85em;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #eef0f2 25%, #e2e4e8 50%, #eef0f2 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.1s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.persona-chips .chip { cursor: pointer; }
+.persona-chips .chip:hover { outline: 2px solid #1a73e8; }
+
+.help-btn--on { background: #1a73e8; color: #fff; }
+
+.presenter-card {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 300px;
+  background: #1d2125;
+  color: #e8eaed;
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  font-size: 0.83rem;
+  z-index: 30;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0.94;
+}
+.presenter-card__title { font-weight: 700; margin-bottom: 0.3rem; }
+.presenter-card ol { margin: 0; padding-left: 1.1rem; }
+.presenter-card li { margin: 0.25rem 0; }
+
 .panel { border: 1px solid #e2e4e8; border-radius: 8px; padding: 0.9rem; margin: 0.7rem 0; background: #fff; }
 .panel__title { font-weight: 600; margin-bottom: 0.5rem; }
 .banner-info {
@@ -348,7 +466,16 @@ tr.row--highlight { background: #fef7e0; }
 }
 
 @media (prefers-color-scheme: dark) {
+  .page-intro__body { background: #23272b; }
+  .skeleton {
+    background: linear-gradient(90deg, #2d3237 25%, #3c4348 50%, #2d3237 75%);
+    background-size: 200% 100%;
+  }
   .card, .panel, .modal-panel, .drawer { background: #1f2327; border-color: #33383d; }
+  /* modal + drawer hardcode a light-mode text color — override it or the
+     tour renders dark-on-dark (user-reported, screenshot-verified) */
+  .modal-panel, .drawer { color: #e8eaed; }
+  .modal-head, .modal-foot { border-color: #33383d; }
   .card--link:hover, .data-table__row--clickable:hover { background: #262c33; }
   .select, .input, .btn { background: #23272b; color: #e8eaed; border-color: #3c4348; }
   .btn:hover:not(:disabled) { background: #2d3237; }
@@ -357,9 +484,342 @@ tr.row--highlight { background: #fef7e0; }
   .gate-row { background: #23272b; }
   .bar { background: #2d3237; }
   .bar__label { color: #e8eaed; }
-  .muted, .card__label, .data-table th { color: #9aa0a6; }
+  .muted, .card__label, .data-table th, .form-row label,
+  .gate-row__evidence, .page-intro, .reason-list__evidence { color: #9aa0a6; }
   .data-table th, .data-table td { border-bottom-color: #33383d; }
   .tabs { border-bottom-color: #33383d; }
   tr.row--highlight { background: #3a3420; }
   .modal-close, .drawer__close { color: #e8eaed; }
+}
+
+/* compare mode — layout only; columns reuse .panel/.verdict-banner/.gate-row/
+   .error-banner/.banner-info, which already carry their own dark-mode rules, so
+   no colors are introduced here and no dark sub-block is needed. */
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 700px) { .compare-grid { grid-template-columns: 1fr; } }
+
+/* command palette */
+.palette {
+  width: 92vw;
+  max-width: 520px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #1d2125;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.palette input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid #e2e4e8;
+  padding: 0.9rem 1rem;
+  font-size: 1.05rem;
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+.palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.palette__item {
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+.palette__item--active {
+  background: #d7e3ff;
+  border-left-color: #1a73e8;
+  font-weight: 600;
+}
+.palette__typehint { padding: 0.1rem 0.9rem 0.5rem; }
+.palette__def {
+  margin: 0 0.7rem 0.6rem;
+  background: #f8f9fa;
+  border-left: 3px solid #1a73e8;
+  border-radius: 0 6px 6px 0;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.palette__def strong { text-transform: capitalize; }
+.palette__hint {
+  border-top: 1px solid #e2e4e8;
+  padding: 0.5rem 1rem;
+  font-size: 0.78rem;
+  color: #5f6368;
+}
+@media (prefers-color-scheme: dark) {
+  .palette { background: #1f2327; color: #e8eaed; }
+  .palette input { border-bottom-color: #33383d; }
+  .palette__item--active { background: #34435f; }
+  .palette__def { background: #23272b; }
+  .palette__hint { border-top-color: #33383d; color: #9aa0a6; }
+}
+
+/* onboarding */
+.persona-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #e8f0fe;
+  font-size: 0.85rem;
+  padding: 0.35rem 1.25rem;
+}
+.ffm__head { display: flex; align-items: center; justify-content: space-between; }
+.ffm__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+}
+.ffm__check { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.ffm__hide { color: #5f6368; font-weight: 400; }
+
+@media (prefers-color-scheme: dark) {
+  .persona-strip { background: #34435f; }
+  .persona-strip .page-intro__more { color: #8ab4f8; }
+  .ffm__hide { color: #9aa0a6; }
+}
+
+/* page polish: groups+progress */
+
+/* Groups — card header: name + badges left, actions right */
+.group-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.group-card__name { display: inline-flex; align-items: center; gap: 0.15rem; flex-wrap: wrap; }
+.group-card__actions { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+/* Groups — member chips fade in, lightly staggered */
+.group-members .chip {
+  animation: gp-chip-in 120ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 25ms);
+}
+@keyframes gp-chip-in { from { opacity: 0; } }
+
+/* Progress — report header sticks within the table's own vertical scroll */
+.progress-page .table-scroll { max-height: 70vh; }
+.progress-page .data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: inset 0 -1px 0 #e2e4e8;
+}
+
+/* Progress — completion glyph hover feedback */
+.progress-page .glyph { transition: transform 120ms ease; }
+.progress-page .glyph:hover { transform: scale(1.3); }
+
+/* Progress — percent bars grow from empty on load */
+.progress-page .bar__fill { animation: gp-bar-grow 600ms ease-out; }
+@keyframes gp-bar-grow { from { width: 0; } }
+
+/* Progress — history snapshots slide in, staggered */
+.progress-snap {
+  animation: gp-snap-in 240ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+@keyframes gp-snap-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Progress — deleted-course badge pulses once on first render */
+.progress-deleted-flag { display: inline-block; animation: gp-pulse-once 800ms ease-in-out 1; }
+@keyframes gp-pulse-once { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+/* Groups — activity-policy row flashes once after its editor saves (translucent
+   tint reads on both light and amber-highlighted rows in either theme) */
+.gp-row-flash { animation: gp-row-flash 800ms ease-out 1; }
+@keyframes gp-row-flash { from { background-color: rgba(26, 115, 232, 0.28); } }
+
+@media (prefers-color-scheme: dark) {
+  .progress-page .data-table th { background: #16191c; box-shadow: inset 0 -1px 0 #33383d; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-members .chip,
+  .progress-page .bar__fill,
+  .progress-snap,
+  .progress-deleted-flag,
+  .gp-row-flash { animation: none; }
+  .progress-page .glyph { transition: none; }
+  .progress-page .glyph:hover { transform: none; }
+}
+
+/* page polish: dashboard+demos */
+
+/* Dashboard — headline counts are buttons that open their page; keep the
+   centered stat look, add a hover lift + pointer. */
+button.card--stat {
+  width: 100%;
+  font: inherit;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+button.card--stat:hover {
+  background: #f4f7ff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+/* Dashboard — "now look at" suggestion under the chips; fades in on switch
+   (the line is re-keyed by acting-user id). */
+.look-at {
+  font-size: 0.85rem;
+  color: #5f6368;
+  margin: 0.2rem 0 0.5rem;
+  animation: look-at-in 140ms ease-out;
+}
+@keyframes look-at-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Dashboard — section jump-card carries its live count on the right. */
+.section-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Demos — HC cards get a hover lift + a one-line "what you'll see". */
+.hc-card { transition: transform 140ms ease, box-shadow 140ms ease; }
+.hc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+.hc-card__see {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1a56b8;
+  margin-bottom: 0.35rem;
+}
+
+/* Demos — HC-2 setup row is a native fieldset so it disables wholesale while a
+   step runs. */
+.setup-fieldset { border: 0; padding: 0; margin: 0.5rem 0; min-width: 0; }
+
+/* Demos — HC-2 step timeline pills (baseline / dropped / returned). */
+.step-pills { display: flex; gap: 0.4rem; margin: 0.6rem 0; }
+.step-pill {
+  padding: 0.15rem 0.6rem;
+  border-radius: 12px;
+  background: #eef0f2;
+  color: #5f6368;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.step-pill--done { background: #e6f4ea; color: #137333; }
+.step-pill--on { background: #1a73e8; color: #fff; }
+
+/* Demos — HC-2 step content fades/slides in on each step change. */
+.step-panel { animation: step-in 140ms ease-out; }
+@keyframes step-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Demos — API trail reads as a log: monospace, newest line flashes once. */
+.trail-line {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: #5f6368;
+  padding: 0.1rem 0;
+  border-radius: 3px;
+}
+.trail-line--new { animation: trail-flash 900ms ease-out; }
+@keyframes trail-flash {
+  from { background: #fef7e0; }
+  to { background: transparent; }
+}
+@keyframes trail-flash-dark {
+  from { background: #3a3420; }
+  to { background: transparent; }
+}
+
+@media (prefers-color-scheme: dark) {
+  button.card--stat:hover { background: #262c33; }
+  .hc-card__see { color: #8ab4f8; }
+  .step-pill { background: #2d3237; color: #9aa0a6; }
+  .trail-line { color: #9aa0a6; }
+  .trail-line--new { animation-name: trail-flash-dark; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.card--stat,
+  .look-at,
+  .hc-card,
+  .step-panel,
+  .trail-line--new { animation: none; transition: none; }
+}
+
+/* page polish: enrolment+roles ------------------------------------------- */
+
+/* Enrolment · summary line above the roster (counts of loaded rows only) */
+.roster-summary { margin: 0.2rem 0 0.4rem; }
+
+/* Enrolment · per-path action cluster gains a faint tint on row hover */
+.roster .path-actions { border-radius: 6px; }
+.roster tbody tr:hover .path-actions { background: rgba(26, 115, 232, 0.08); }
+
+/* Roles · scenario buttons stack a one-line subtitle under their label */
+.btn--scenario {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  max-width: 16rem;
+  text-align: left;
+  line-height: 1.25;
+}
+.btn--scenario__label { font-weight: 600; }
+.btn--scenario__sub { font-size: 0.75rem; color: #5f6368; white-space: normal; }
+
+/* motion — all of it gated on prefers-reduced-motion */
+@media (prefers-reduced-motion: no-preference) {
+  .roster .path-actions { transition: background-color 120ms ease; }
+
+  /* affected row flashes once after a successful mutation */
+  tr.row--flash { animation: row-flash 900ms ease-out; }
+  @keyframes row-flash {
+    from { background: var(--flash-bg, #fff3c4); }
+    to { background: transparent; }
+  }
+
+  /* verdict fades in; its gate rows stagger up on each fresh check */
+  .checker-verdict .verdict-banner { animation: cv-fade 260ms ease both; }
+  .checker-verdict .gate-list .gate-row { animation: cv-rise 260ms ease both; }
+  .checker-verdict .gate-list .gate-row:nth-child(2) { animation-delay: 60ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(3) { animation-delay: 120ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(4) { animation-delay: 180ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(5) { animation-delay: 240ms; }
+  .checker-verdict .gate-list .gate-row:nth-child(6) { animation-delay: 300ms; }
+  @keyframes cv-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes cv-rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* dark sub-block */
+@media (prefers-color-scheme: dark) {
+  .btn--scenario__sub { color: #9aa0a6; }
+  .roster tbody tr:hover .path-actions { background: rgba(138, 180, 248, 0.12); }
+  tr.row--flash { --flash-bg: #3a3420; }
 }

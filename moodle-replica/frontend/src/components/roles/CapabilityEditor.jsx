@@ -1,17 +1,20 @@
 // Roles tab: the capability sheet for one role at one context. Each row's
-// four-state control PUTs on change and refetches (no optimistic UI); the
-// resolved sheet — override chips, decided_at, prohibit stickiness — comes
+// four-state control POSTs on change and refetches (no optimistic UI); the
+// resolved sheet — override chips, defined_at, prohibit stickiness — comes
 // straight from the API, nothing is computed here.
 import { useEffect, useState } from "react";
-import { apiGet, apiPut } from "../../api";
+import { apiGet, apiPost } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 import DataTable from "../common/DataTable";
+import ContextPath from "../common/ContextPath";
 
 const PERMISSIONS = [
-  { value: "", label: "Not set" },
+  { value: "notset", label: "Not set" },
   { value: "allow", label: "Allow" },
   { value: "prevent", label: "Prevent" },
   { value: "prohibit", label: "Prohibit" },
 ];
+const SYSTEM_CONTEXT_ID = 1;
 
 export default function CapabilityEditor() {
   const [roles, setRoles] = useState([]);
@@ -24,7 +27,7 @@ export default function CapabilityEditor() {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    Promise.all([apiGet("/api/roles"), apiGet("/api/roles/contexts")])
+    Promise.all([cachedGet("/api/roles"), cachedGet("/api/roles/contexts")])
       .then(([r, c]) => {
         setRoles(r);
         setContexts(c);
@@ -44,21 +47,13 @@ export default function CapabilityEditor() {
       .finally(() => setLoading(false));
   }, [roleId, contextId, tick]);
 
-  function setPermission(capability, sel) {
-    setError(null);
-    // "" clears the override — send null, never the string "notset".
-    apiPut(`/api/roles/${roleId}/capabilities`, {
-      context_id: contextId,
-      capability,
-      permission: sel === "" ? null : sel,
-    })
+  function setPermission(capability, permission) {
+    apiPost(`/api/roles/${roleId}/capabilities`, { context_id: contextId, capability, permission })
       .then(() => setTick((t) => t + 1)) // refetch — never trust local state
       .catch((e) => setError(e.message));
   }
 
-  const selectedContext = contexts.find((c) => c.id === contextId);
-  const atSystem = selectedContext?.level === "system";
-
+  const atSystem = contextId === SYSTEM_CONTEXT_ID;
   const columns = [
     { key: "capability", label: "Capability" },
     {
@@ -68,7 +63,7 @@ export default function CapabilityEditor() {
         <>
           <select
             className="select"
-            value={row.permission ?? ""}
+            value={row.permission}
             onChange={(e) => setPermission(row.capability, e.target.value)}
           >
             {PERMISSIONS.map((p) => (
@@ -90,11 +85,11 @@ export default function CapabilityEditor() {
         row.is_override && !atSystem ? <span className="chip">override</span> : null,
     },
     {
-      key: "decided_at",
-      label: "Decided at",
+      key: "defined_at",
+      label: "Defined at",
       render: (row) =>
-        row.decided_at ? (
-          <span className="muted">decided at {row.decided_at}</span>
+        row.defined_at ? (
+          <span className="muted">decided at {row.defined_at.label}</span>
         ) : (
           <span className="muted">—</span>
         ),
@@ -103,6 +98,20 @@ export default function CapabilityEditor() {
 
   return (
     <div>
+      <div className="form-row">
+        {roles.map((r) => (
+          <span
+            className="chip"
+            key={r.id}
+            style={roleId === r.id ? { outline: "2px solid #1a73e8" } : undefined}
+            title={`archetype: ${r.archetype ?? "none"} — what 'reset to defaults' resets to`}
+            onClick={() => setRoleId(r.id)}
+          >
+            {r.short_name ?? r.shortname}
+            {r.archetype && <span className="muted"> ({r.archetype})</span>}
+          </span>
+        ))}
+      </div>
       <div className="form-row">
         <label>Role</label>
         <select
@@ -129,6 +138,7 @@ export default function CapabilityEditor() {
           ))}
         </select>
       </div>
+      <ContextPath contextId={contextId} contexts={contexts} />
       {error && <div className="error-banner">{error}</div>}
       <DataTable
         columns={columns}

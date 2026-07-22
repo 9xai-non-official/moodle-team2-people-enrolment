@@ -4,6 +4,8 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPatch, apiPost, apiDelete } from "../../api";
 import Badge from "../common/Badge";
+import MethodCreateForm from "./MethodCreateForm";
+import GuestPreview from "./GuestPreview";
 
 export default function MethodsPanel({ courseId }) {
   const [methods, setMethods] = useState([]);
@@ -35,13 +37,20 @@ export default function MethodsPanel({ courseId }) {
       .finally(() => setBusy(false));
   };
 
-  if (loading) return <p className="muted">Loading…</p>;
-  if (error) return <div className="error-banner">{error}</div>;
-  if (!methods.length) return <p className="muted">No enrolment methods.</p>;
-
   return (
     <div>
-      {methods.map((m) => {
+      <div className="panel__title">Enrolment methods</div>
+      <MethodCreateForm courseId={courseId} onCreated={load} />
+
+      {loading && <p className="muted">Loading…</p>}
+      {!loading && error && <div className="error-banner">{error}</div>}
+      {!loading && !error && !methods.length && (
+        <p className="muted">No enrolment methods.</p>
+      )}
+
+      {!loading &&
+        !error &&
+        methods.map((m) => {
         const res = syncResult[m.id];
         return (
           <div className="panel" key={m.id}>
@@ -91,7 +100,11 @@ export default function MethodsPanel({ courseId }) {
                 className="btn btn--danger"
                 disabled={busy}
                 onClick={() =>
-                  run(apiDelete(`/api/enrolment/methods/${m.id}`))
+                  window.confirm(
+                    `Remove the ${m.method} method?\n\nEveryone enrolled ONLY via this ` +
+                    "method leaves the course (their completion records survive). " +
+                    "People with another path stay enrolled — that's hard case #1.",
+                  ) && run(apiDelete(`/api/enrolment/methods/${m.id}`))
                 }
               >
                 Remove method
@@ -110,6 +123,8 @@ export default function MethodsPanel({ courseId }) {
           </div>
         );
       })}
+
+      <GuestPreview courseId={courseId} />
     </div>
   );
 }

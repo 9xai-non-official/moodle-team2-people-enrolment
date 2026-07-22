@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import db
+from app import db, errors
 from app.routers import users, courses, enrolment, roles, groups, progress
 from app.routers import permissions
 
@@ -29,7 +29,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow the Vite dev server (localhost:5173) to call this API during development.
+# Allow the Vite dev server (localhost:5173) during development, plus the
+# deployed frontend on Vercel (any *.vercel.app preview/prod of this team).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -39,10 +40,29 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5174",
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Map database constraint violations onto shaped {ok:false, code, reason}
+# responses instead of bare 500s (work package §15). Registered before the
+# routers so every endpoint inherits it.
+#
+# MERGE POINT for Khaled's D-AUTH middleware — add it to the stack here.
+errors.install(app)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Friendly landing for the bare API domain — people WILL open it."""
+    return {
+        "service": "WhoCan API — people & enrolment",
+        "app": "https://whocan.vercel.app",
+        "health": "/api/health",
+        "docs": "/docs",
+    }
 
 
 @app.get("/api/health", tags=["health"])
