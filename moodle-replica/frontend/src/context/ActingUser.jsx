@@ -9,6 +9,7 @@ const ActingUserContext = createContext({
   users: [],
   actingUser: null,
   setActingUserId: () => {},
+  addUser: () => {},
   error: null,
 });
 
@@ -26,12 +27,17 @@ export function ActingUserProvider({ children }) {
       .catch((e) => setError(e.message));
   }, []);
 
+  // Signup (mock) creates a user the initial /api/users fetch didn't know —
+  // register it so login can act as it immediately.
+  const addUser = (u) =>
+    setUsers((cur) => (cur.some((x) => x.id === u.id) ? cur : [...cur, u]));
+
   const actingUser = users.find((u) => u.id === actingUserId) || null;
   setApiActingUser(actingUser?.id ?? null); // keep the API principal header in sync
 
   return (
     <ActingUserContext.Provider
-      value={{ users, actingUser, setActingUserId, error }}
+      value={{ users, actingUser, setActingUserId, addUser, error }}
     >
       {children}
     </ActingUserContext.Provider>

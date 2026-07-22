@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { apiGet } from "../api";
 import { fetchOverview } from "../lib/progressApi";
 import { useActingUser } from "../context/ActingUser";
+import { useSession } from "../context/Session";
+import { navFor } from "./index";
 import Badge from "../components/common/Badge";
 import PageIntro from "../components/common/PageIntro";
 import FirstFiveMinutes from "../components/common/FirstFiveMinutes";
@@ -55,6 +57,9 @@ function ProgressBar({ percent }) {
 
 export default function DashboardPage({ onNavigate }) {
   const { actingUser, users, setActingUserId } = useActingUser();
+  const { session } = useSession();
+  const explore = session?.mode === "explore";
+  const allowed = navFor(session); // students never get dead links to hidden pages
   const [stats, setStats] = useState(null);
   const [statsError, setStatsError] = useState(null);
   const [overview, setOverview] = useState([]);
@@ -80,35 +85,47 @@ export default function DashboardPage({ onNavigate }) {
       <h1>Dashboard</h1>
       <PageIntro line="You are somebody — try being someone else, then explore your world." />
 
-      {/* TRY BEING SOMEONE ELSE — the hero: everything downstream depends on
-          who you are, so the switch leads. */}
-      <h2>Try being somebody</h2>
-      {actingUser && (
-        <p className="muted">
-          Right now you are <strong>{actingUser.full_name}</strong>. Switch below
-          to see the app through someone else&apos;s eyes.
-        </p>
+      {/* TRY BEING SOMEONE ELSE — the hero in explore mode: everything
+          downstream depends on who you are, so the switch leads. Signed-in
+          users are locked to themselves (that's what signing in means). */}
+      {explore ? (
+        <>
+          <h2>Try being somebody</h2>
+          {actingUser && (
+            <p className="muted">
+              Right now you are <strong>{actingUser.full_name}</strong>. Switch
+              below to see the app through someone else&apos;s eyes.
+            </p>
+          )}
+          <div className="form-row persona-chips">
+            {users
+              .filter((u) => PERSONAS[u.username])
+              .map((u) => (
+                <span
+                  key={u.id}
+                  className="chip"
+                  title={PERSONAS[u.username].blurb}
+                  onClick={() => setActingUserId(u.id)}
+                  style={
+                    actingUser?.id === u.id
+                      ? { outline: "2px solid #1a73e8" }
+                      : undefined
+                  }
+                >
+                  {personaLabel(u.username)}
+                </span>
+              ))}
+          </div>
+        </>
+      ) : (
+        actingUser && (
+          <p className="muted">
+            Welcome back, <strong>{actingUser.full_name}</strong> — this whole
+            app shows only what <em>you</em> may see and do.
+          </p>
+        )
       )}
-      <div className="form-row persona-chips">
-        {users
-          .filter((u) => PERSONAS[u.username])
-          .map((u) => (
-            <span
-              key={u.id}
-              className="chip"
-              title={PERSONAS[u.username].blurb}
-              onClick={() => setActingUserId(u.id)}
-              style={
-                actingUser?.id === u.id
-                  ? { outline: "2px solid #1a73e8" }
-                  : undefined
-              }
-            >
-              {personaLabel(u.username)}
-            </span>
-          ))}
-      </div>
-      {lookAt && (
+      {explore && lookAt && (
         <p className="look-at" key={actingUser.id}>
           now look at:{" "}
           <button
@@ -120,7 +137,7 @@ export default function DashboardPage({ onNavigate }) {
         </p>
       )}
 
-      <FirstFiveMinutes onNavigate={onNavigate} />
+      {explore && <FirstFiveMinutes onNavigate={onNavigate} />}
 
       {/* HERE'S YOUR WORLD — counts (each opens its page), your progress, and
           the section jumps. */}
@@ -131,8 +148,8 @@ export default function DashboardPage({ onNavigate }) {
           <button
             className="card card--stat"
             key={k}
-            title={`Open ${STAT_NAV[k]} →`}
-            onClick={() => onNavigate(STAT_NAV[k])}
+            title={allowed.includes(STAT_NAV[k]) ? `Open ${STAT_NAV[k]} →` : undefined}
+            onClick={() => allowed.includes(STAT_NAV[k]) && onNavigate(STAT_NAV[k])}
           >
             <div className="card__number">{stats ? stats[k] : "…"}</div>
             <div className="card__label">{k}</div>
@@ -166,7 +183,7 @@ export default function DashboardPage({ onNavigate }) {
 
       <h2>Sections</h2>
       <div className="grid-cards">
-        {SECTIONS.map((s) => (
+        {SECTIONS.filter((s) => allowed.includes(s.name)).map((s) => (
           <button
             key={s.name}
             className="card card--link section-card"

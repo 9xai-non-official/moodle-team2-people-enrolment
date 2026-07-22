@@ -206,6 +206,54 @@ export const LAST_ACCESS = [
   { user_id: 7, course_id: 1, accessed_at: "2026-06-30T10:00:00Z" },
 ];
 
+// ---- LMS experience layer (auth, catalog, submissions, quizzes) ----------
+// Fixtures for the signup/login + student/teacher portal flows. Same rule:
+// domain mocks import ids from here; never invent parallel fixtures.
+
+// Quiz definitions keyed by activity id. `answer` is the marking key — the
+// mock API strips it before sending questions to a student.
+export const QUIZZES = [
+  {
+    activity_id: 102,
+    attempts_allowed: 3,
+    grade_to_pass: 6,
+    questions: [
+      { id: 1, type: "multichoice", text: "Which data structure is FIFO?", points: 2, options: ["Stack", "Queue", "Tree", "Heap"], answer: 1 },
+      { id: 2, type: "truefalse", text: "Binary search requires sorted input.", points: 2, answer: true },
+      { id: 3, type: "multichoice", text: "Time complexity of a linear scan?", points: 2, options: ["O(1)", "O(log n)", "O(n)", "O(n²)"], answer: 2 },
+      { id: 4, type: "essay", text: "In two sentences: why do arrays beat linked lists on cache locality?", points: 4, answer: null },
+    ],
+  },
+];
+
+// Assignment submissions. status: draft | submitted | graded.
+// files carry no bytes in seed rows — uploads from the UI add data_url too.
+export const SUBMISSIONS = [
+  { id: 81, activity_id: 101, user_id: 7, status: "submitted", text: "Solution attached.", files: [{ name: "solution.pdf", size: 24812, type: "application/pdf" }], statement_accepted: true, submitted_at: "2026-07-18T09:12:00Z", grade: null, feedback: null, graded_by: null },
+  { id: 82, activity_id: 101, user_id: 5, status: "graded", text: "See essay file.", files: [{ name: "essay.docx", size: 18110, type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }], statement_accepted: true, submitted_at: "2026-07-15T11:03:00Z", grade: 86, feedback: "Solid work — cite sources next time.", graded_by: 2 },
+  { id: 83, activity_id: 101, user_id: 6, status: "draft", text: "wip — not done yet", files: [], statement_accepted: false, submitted_at: null, grade: null, feedback: null, graded_by: null },
+];
+
+// Quiz attempts. state: in_progress | finished (essay awaiting marking) | graded.
+export const QUIZ_ATTEMPTS = [
+  { id: 71, activity_id: 102, user_id: 7, state: "finished", started_at: "2026-07-19T10:00:00Z", finished_at: "2026-07-19T10:24:00Z", answers: { 1: 1, 2: true, 3: 2, 4: "Contiguous memory keeps neighbouring elements on the same cache line, so sequential reads rarely miss." }, auto_score: 6, essay_scores: {}, total: null },
+  { id: 72, activity_id: 102, user_id: 5, state: "graded", started_at: "2026-07-14T09:00:00Z", finished_at: "2026-07-14T09:31:00Z", answers: { 1: 1, 2: true, 3: 1, 4: "Arrays are contiguous; linked nodes scatter across the heap." }, auto_score: 4, essay_scores: { 4: 3 }, total: 7 },
+];
+
+// Enrolment requests — student asks, teacher approves (core Moodle has no
+// request-to-enrol; this is our deliberate improvement over stock behaviour).
+// Ghada (9) returning to CS101 doubles as the HC-2 "re-enrol" story.
+export const ENROL_REQUESTS = [
+  { id: 51, course_id: 1, user_id: 9, message: "Returning after a break — need CS101 to finish my degree.", status: "pending", requested_at: "2026-07-21T16:00:00Z", decided_by: null },
+];
+
+// Course requests — Moodle-faithful: plain teachers CANNOT create courses
+// (moodle/course:create defaults to Manager/Course creator); they may only
+// request one (moodle/course:request), and approval makes them its teacher.
+export const COURSE_REQUESTS = [
+  { id: 55, requester_id: 2, full_name: "Advanced Computer Science", short_name: "CS201", reason: "Follow-up course for CS101 graduates.", status: "pending", decided_by: null },
+];
+
 // ---- tiny shared helpers -------------------------------------------------
 export const userById = (id) => USERS.find((u) => u.id === id) || null;
 export const courseById = (id) => COURSES.find((c) => c.id === id) || null;
