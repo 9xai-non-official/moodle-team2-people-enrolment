@@ -12,6 +12,8 @@ body {
   min-height: 100vh;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root { color: #e8eaed; background: #16191c; }
-}
+/* Root canvas follows the explicit theme (context/Theme.jsx sets data-theme on
+   <html> before first paint, resolving "system" → light|dark). Keyed off the
+   attribute — NOT @media (prefers-color-scheme) — so an explicit Light/Dark
+   choice wins over the OS at the html/body canvas too, matching App.css. */
+:root[data-theme="dark"] { color: #e8eaed; background: #16191c; }
