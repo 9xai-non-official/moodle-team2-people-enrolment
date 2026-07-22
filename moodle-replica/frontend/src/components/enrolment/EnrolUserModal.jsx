@@ -1,6 +1,19 @@
 // Manual enrolment (task 06 §4.2). Role options come from GET /api/roles
 // (Khaled's domain); default is the manual method's default_role. Backend
 // refusals are shown verbatim via ReasonList — never swallowed.
+//
+// RE-ENROL INTENT
+// Re-enrolling someone who is currently SUSPENDED must not quietly reactivate
+// them — suspension is a deliberate act and undoing it should be too. So the
+// request carries `activate` only when the operator ticks the box, and the
+// field is omitted entirely otherwise rather than sent as false.
+//
+// BLOCKED ON BACKEND: services/enrolment.py:236-241 upserts with a hardcoded
+// `set status = 'active'`, so today EVERY re-enrol reactivates regardless of
+// what this sends, and EnrolRequest (schemas_enrolment.py:40-44) has no
+// `activate` field to receive. The control below expresses the intent and is
+// wired, but it cannot change behaviour until that lands. Raised with the
+// enrolment backend engineer — see the shared-diff request in the handover.
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../../api";
 import Modal from "../common/Modal";
@@ -15,17 +28,21 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
   const [roleId, setRoleId] = useState(null);
   const [timeStart, setTimeStart] = useState("");
   const [timeEnd, setTimeEnd] = useState("");
+  const [activate, setActivate] = useState(false); // never defaults to true
   const [reasons, setReasons] = useState(null);
+  const [failure, setFailure] = useState(null); // the ApiError, for its status
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setReasons(null);
+    setFailure(null);
     setError(null);
     setUserId(null);
     setTimeStart("");
     setTimeEnd("");
+    setActivate(false); // re-arm on every open: intent is per-action
     apiGet("/api/roles")
       .then(setRoles)
       .catch(() => setRoles([])); // fall back to the method's default role below
@@ -59,6 +76,7 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
   const submit = () => {
     setBusy(true);
     setReasons(null);
+    setFailure(null);
     setError(null);
     apiPost(`/api/enrolment/courses/${courseId}/enrol`, {
       user_id: userId,
@@ -66,14 +84,29 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
       method_id: method?.id,
       time_start: timeStart || undefined,
       time_end: timeEnd || undefined,
+      // Omitted unless deliberately chosen — an absent field cannot be read as
+      // "reactivate", which `activate: false` eventually might be.
+      ...(activate ? { activate: true } : {}),
     })
       .then(() => onEnrolled())
       .catch((e) => {
-        if (e instanceof ApiError) setReasons(e.reasons);
-        else setError(e.message);
+        if (e instanceof ApiError) {
+          setFailure(e);
+          setReasons(e.reasons);
+        } else setError(e.message);
       })
       .finally(() => setBusy(false));
   };
+
+  // The server's status decides the heading; the reasons themselves stay
+  // verbatim. 409 is the duplicate/guest conflict, 403 a capability refusal,
+  // 401 no verified identity (Khaled's D-AUTH).
+  const refusalTitle = (status) =>
+    ({
+      401: "Not signed in",
+      403: "Not permitted",
+      409: "Conflict — already enrolled or not allowed here",
+    })[status] ?? "Could not enrol";
 
   // Enter anywhere in the form submits once a user is chosen (the only
   // required field); selects and datetime inputs otherwise swallow it.
@@ -142,8 +175,35 @@ export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) 
           onChange={(e) => setTimeEnd(e.target.value)}
         />
       </div>
+      {/* INSUFFICIENT EVIDENCE — requires staging inspection.
+          Placement is a guess: this sits after the date fields because it
+          qualifies the write, but whether it belongs here, beside the user
+          select (where the operator learns the user is suspended), or only
+          appears once the chosen user IS suspended, is not decidable from the
+          code. The last of those is probably best and needs the participant's
+          effective_status at selection time, which UserSelect does not
+          currently provide. */}
+      <div className="form-row">
+        <label htmlFor="reenrol-activate">Reactivate</label>
+        <span>
+          <input
+            id="reenrol-activate"
+            type="checkbox"
+            checked={activate}
+            onChange={(e) => setActivate(e.target.checked)}
+          />{" "}
+          <span className="muted">
+            If this user is currently suspended, reactivate them. Leave
+            unticked to re-enrol without lifting the suspension.
+          </span>
+        </span>
+      </div>
       {reasons && (
-        <ReasonList reasons={reasons} tone="error" title="Could not enrol" />
+        <ReasonList
+          reasons={reasons}
+          tone="error"
+          title={refusalTitle(failure?.status)}
+        />
       )}
       </div>
     </Modal>

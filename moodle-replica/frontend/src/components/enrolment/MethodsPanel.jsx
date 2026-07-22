@@ -1,11 +1,43 @@
 // Enrolment method instances (task 06 §4.2): one .panel per method, with
 // enable/disable, cohort sync, and remove. Every mutation refetches — no
 // optimistic UI. Remove deletes only this path's enrolments (HC-1).
+//
+// EXPIRY / CAPACITY CONFIGURATION
+// Only what the backend actually honours is editable here. Phase F asked for
+// four fields; three of them do not exist in the contract, and shipping inputs
+// that silently do nothing is worse than not shipping them:
+//
+//   max_enrolled   SUPPORTED — the capacity gate reads config.max_enrolled
+//                  (services/enrolment.py:435-444). Self-enrol only: that is
+//                  the sole path the gate chain runs on.
+//   enrol_start /  SUPPORTED — real MethodOut columns, accepted by
+//   enrol_end      MethodPatch. This is the "enrolment period".
+//   expiredaction  NOT IN CONTRACT — no reference anywhere in app/.
+//   longtimenosee  NOT IN CONTRACT — schemas_enrolment.py:27 mentions an
+//                  `inactivity_days` config key, but no service code reads it,
+//                  so it is a comment rather than a feature.
+//
+// The two missing ones are requested in the Phase F handover. Do not add
+// inputs for them until a backend engineer confirms they are read.
 import { useEffect, useState } from "react";
 import { apiGet, apiPatch, apiPost, apiDelete } from "../../api";
 import Badge from "../common/Badge";
 import MethodCreateForm from "./MethodCreateForm";
 import GuestPreview from "./GuestPreview";
+
+// datetime-local wants "YYYY-MM-DDTHH:mm"; the API returns ISO-8601.
+const toLocal = (iso) => (iso ? String(iso).slice(0, 16) : "");
+
+// A window that is already set CANNOT be cleared through the API:
+// update_method builds `enrol_start = coalesce($4, enrol_start)`
+// (services/enrolment.py:597-598), so a null means "leave it alone", not
+// "unset it". PATCH still returns 200, so a cleared field looks saved and
+// silently is not. VERIFIED: set 2030-01-01, PATCH null, value unchanged.
+//
+// Rather than ship a control that lies, we detect the case and say so.
+// Fix belongs in the backend (exclude_unset, or a sentinel for "clear").
+const clearsExisting = (m, d) =>
+  (!!m.enrol_start && !d.enrol_start) || (!!m.enrol_end && !d.enrol_end);
 
 export default function MethodsPanel({ courseId }) {
   const [methods, setMethods] = useState([]);
@@ -33,8 +65,44 @@ export default function MethodsPanel({ courseId }) {
         if (after) after(res);
         load();
       })
-      .catch((e) => setError(e.message))
+      // Server reason, not just the transport line.
+      .catch((e) =>
+        setError(e.reasons?.length ? e.reasons.join(" · ") : e.message),
+      )
       .finally(() => setBusy(false));
+  };
+
+  // Per-method draft edits, keyed by method id. Absent = not being edited.
+  const [draft, setDraft] = useState({});
+  const editing = (m) =>
+    draft[m.id] ?? {
+      enrol_start: toLocal(m.enrol_start),
+      enrol_end: toLocal(m.enrol_end),
+      max_enrolled: m.config?.max_enrolled ?? "",
+    };
+  const edit = (m, patch) =>
+    setDraft((d) => ({ ...d, [m.id]: { ...editing(m), ...patch } }));
+
+  const saveConfig = (m) => {
+    const d = editing(m);
+    const body = {
+      enrol_start: d.enrol_start || null,
+      enrol_end: d.enrol_end || null,
+    };
+    if (m.method === "self") {
+      // Merge, never replace: config also carries `key` and `sync_group_id`,
+      // and PATCH overwrites the whole object.
+      body.config = {
+        ...(m.config ?? {}),
+        max_enrolled: d.max_enrolled === "" ? null : Number(d.max_enrolled),
+      };
+    }
+    run(apiPatch(`/api/enrolment/methods/${m.id}`, body), () =>
+      setDraft((s) => {
+        const { [m.id]: _drop, ...rest } = s;
+        return rest;
+      }),
+    );
   };
 
   return (
@@ -112,6 +180,68 @@ export default function MethodsPanel({ courseId }) {
             </div>
             <div className="muted">
               Removes only this path’s enrolments — HC-1.
+            </div>
+
+            {/* INSUFFICIENT EVIDENCE — requires staging inspection.
+                Rendered inline under each method as a plain form-row, matching
+                the surrounding panels. Whether these belong inline, behind a
+                "Configure" disclosure, or in the create form only, is not
+                decidable from the code. Field SET is contract-driven, not a
+                guess; only the LAYOUT is uncertain. */}
+            <div className="form-row">
+              <label>Enrol from</label>
+              <input
+                className="input"
+                type="datetime-local"
+                value={editing(m).enrol_start}
+                onChange={(e) => edit(m, { enrol_start: e.target.value })}
+              />
+              <label>until</label>
+              <input
+                className="input"
+                type="datetime-local"
+                value={editing(m).enrol_end}
+                onChange={(e) => edit(m, { enrol_end: e.target.value })}
+              />
+              {m.method === "self" && (
+                <>
+                  <label>Max enrolled</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    style={{ width: "7rem" }}
+                    placeholder="unlimited"
+                    value={editing(m).max_enrolled ?? ""}
+                    onChange={(e) => edit(m, { max_enrolled: e.target.value })}
+                  />
+                </>
+              )}
+              <button
+                className="btn"
+                disabled={busy || !draft[m.id]}
+                onClick={() => saveConfig(m)}
+              >
+                Save
+              </button>
+            </div>
+            {draft[m.id] && clearsExisting(m, editing(m)) && (
+              <div className="banner-info">
+                Clearing a date that is already set will not take effect — the
+                API treats an empty value as “leave unchanged”, so the save
+                will report success and the window will stay as it is. Other
+                edits in this row still save normally.
+              </div>
+            )}
+            <div className="muted">
+              The window feeds the <code>window_open</code> gate
+              {m.method === "self" && (
+                <>
+                  ; max enrolled feeds <code>capacity</code>
+                </>
+              )}
+              . Expiry action and long-time-no-see are not implemented in the
+              backend and are deliberately not shown.
             </div>
 
             {res && (
