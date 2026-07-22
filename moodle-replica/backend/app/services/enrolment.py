@@ -212,10 +212,18 @@ async def enrol_user(db, method_id: int, user_id: int, *,
                      time_start: datetime | None = None,
                      time_end: datetime | None = None,
                      actor_id: int | None = None,
+                     activate: bool = False,
                      _group_ops: list | None = None) -> dict:
     """Upsert the enrolment row, insert the provenance role row, and — for
     cohort methods with config.sync_group_id — place the user in the group
     via Mahmoud's service (§6.5, D-1, rule 10: re-enrol updates, never errors).
+
+    T2-ENR-002 (ENR-010): a re-enrol PRESERVES the existing status unless the
+    caller passes an explicit activate=True — a suspended learner must not be
+    silently reactivated by an innocent duplicate enrol. Likewise the time
+    window: only supplied fields are written on conflict (None = "leave it"),
+    mirroring Moodle update_user_enrol's change-gating. A brand-new row is
+    always 'active'.
 
     Group placement runs AFTER the transaction commits (see _groups_call).
     Nested callers that hold the transaction (self_enrol, cohort sync) pass
@@ -235,11 +243,16 @@ async def enrol_user(db, method_id: int, user_id: int, *,
                                    time_end, modified_by)
             values ($1, $2, 'active', $3, $4, $5)
             on conflict (method_id, user_id) do update
-               set status = 'active', time_start = excluded.time_start,
-                   time_end = excluded.time_end,
-                   modified_by = excluded.modified_by, updated_at = now()
+               set status = case when $6 then 'active'
+                                 else enrolment.status end,
+                   time_start = coalesce(excluded.time_start,
+                                         enrolment.time_start),
+                   time_end = coalesce(excluded.time_end, enrolment.time_end),
+                   modified_by = coalesce(excluded.modified_by,
+                                          enrolment.modified_by),
+                   updated_at = now()
             returning *
-        """, method_id, user_id, time_start, time_end, actor_id)
+        """, method_id, user_id, time_start, time_end, actor_id, activate)
 
         result = {"ok": True, "enrolment": row, "role_assigned": None,
                   "group_added": None, "warnings": []}
@@ -282,11 +295,17 @@ async def enrol_user(db, method_id: int, user_id: int, *,
 
 async def unenrol_user(db, method_id: int, user_id: int, *,
                        actor_id: int | None = None,
+                       _cohort_sync: bool = False,
                        _group_ops: list | None = None) -> dict:
     """Remove ONE path: its enrolment row + role rows matching MY
     component+item_id only, then the last-path check (§6.10 / Hard Case #2).
     Completion rows are NEVER deleted — progress resumes on re-enrolment.
-    Group deletions are deferred to after commit (see _groups_call)."""
+    Group deletions are deferred to after commit (see _groups_call).
+
+    R-COHORT (ENR-013, Moodle enrol/cohort/lib.php allow_unenrol_user): an
+    ACTIVE cohort-synced path cannot be manually unenrolled — cohort
+    membership is the source of truth, so suspend it first (or let the sync
+    remove it). The sync itself passes _cohort_sync=True to bypass this."""
     ops: list = [] if _group_ops is None else _group_ops
     async with _tx(db) as conn:
         method = await _method(conn, method_id)
@@ -294,6 +313,16 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             return {"ok": False, "reason": f"enrolment method {method_id} not found"}
         course_id = method["course_id"]
         component = _component(method["method"])
+
+        if method["method"] == "cohort" and not _cohort_sync:
+            current = await _one(conn,
+                "select status from enrolment "
+                "where method_id = $1 and user_id = $2", method_id, user_id)
+            if current is not None and current["status"] == "active":
+                return {"ok": False, "http_status": 409,
+                        "reason": "an active cohort enrolment cannot be "
+                                  "manually unenrolled — suspend it first, or "
+                                  "remove the user from the cohort (ENR-013)"}
 
         deleted = await _all(conn, """
             delete from enrolment where method_id = $1 and user_id = $2
@@ -368,14 +397,21 @@ async def reactivate(db, method_id: int, user_id: int) -> dict:
 
 
 async def _set_status(db, method_id: int, user_id: int, status: str) -> dict:
+    """Change-gated (ENR-010): a no-op flip returns the row untouched instead
+    of rewriting it — updated_at only moves when the status actually moved."""
+    current = await _one(db, """
+        select * from enrolment where method_id = $1 and user_id = $2
+    """, method_id, user_id)
+    if current is None:
+        return {"ok": False, "reason": "user is not enrolled via this method"}
+    if current["status"] == status:
+        return {"ok": True, "enrolment": current, "changed": False}
     row = await _one(db, """
         update enrolment set status = $3, updated_at = now()
          where method_id = $1 and user_id = $2
         returning *
     """, method_id, user_id, status)
-    if row is None:
-        return {"ok": False, "reason": "user is not enrolled via this method"}
-    return {"ok": True, "enrolment": row}
+    return {"ok": True, "enrolment": row, "changed": True}
 
 
 # ===========================================================================
@@ -525,7 +561,7 @@ async def sync_cohort_method(db, method_id: int, *,
                             {"component": "enrol_cohort", "item_id": method_id}))
         for uid in sorted(set(enrolled) - members):
             await unenrol_user(conn, method_id, uid, actor_id=actor_id,
-                               _group_ops=ops)
+                               _cohort_sync=True, _group_ops=ops)
             removed.append(uid)
 
     # tx committed — run the accumulated group side-effects.
@@ -620,8 +656,14 @@ async def delete_method(db, method_id: int, *,
         users = await _all(
             conn, "select user_id from enrolment where method_id = $1", method_id)
         for u in users:
+            # Tearing down the whole instance is a legitimate system removal,
+            # exactly like cohort sync — so bypass the R-COHORT active-unenrol
+            # guard (_cohort_sync=True). Without this, deleting a cohort method
+            # with active members would leave every unenrol refused while the
+            # ON DELETE CASCADE still removed the enrolment rows — orphaning
+            # their role_assignment and group memberships (ghost access).
             await unenrol_user(conn, method_id, u["user_id"], actor_id=actor_id,
-                               _group_ops=ops)
+                               _cohort_sync=True, _group_ops=ops)
         await _all(conn,
                    "delete from enrolment_method where id = $1 returning id",
                    method_id)
