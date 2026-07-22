@@ -42,6 +42,9 @@ class EnrolRequest(BaseModel):
     role_id: int | None = None            # default: the method's default_role_id
     time_start: datetime | None = None
     time_end: datetime | None = None      # null = forever
+    # T2-ENR-002: re-enrolling an existing row PRESERVES its status unless the
+    # caller explicitly opts into reactivation. New rows are always active.
+    activate: bool = False
 
 
 class CourseEnrolRequest(EnrolRequest):

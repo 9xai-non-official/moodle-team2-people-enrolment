@@ -107,6 +107,30 @@ Mock routes: `GET /api/lms/activities/{id}/submissions · attempts`,
 `POST /api/lms/courses/{id}/activities`, `POST /api/lms/courses`,
 `GET|POST /api/lms/course-requests`, `POST /api/lms/course-requests/{id}/approve|reject`.
 
+## 4b. Role-loop additions (iterations 1–3)
+
+Walking each role's story A→Z surfaced gaps; all fixed and gate-tested:
+
+- **Student**: dashboard scoped to their world (requests they're waiting on,
+  not site counts); **self-unenrol** faithful to `enrol/self:unenrolself` —
+  only self-enrolled paths removable, manual/cohort refuse with the reason;
+  completions survive and the UI says so.
+- **Teacher**: roster **"+ Enrol user"** (`enrol/manual:enrol`, editing only),
+  per-path **suspend/reactivate/unenrol** (cohort paths refuse — sync would
+  recreate them), **remove TA role**, **revert-to-draft** on submissions
+  (grade stays on record), **hide/show activities** (non-editing refused).
+- **Admin**: new Admin page — **create accounts** (usable immediately: the
+  confirmation-email gate belongs to self-registration only), site-wide
+  **suspend/reactivate** (no self-lockout), **course create/hide/soft-delete**
+  — deletion keeps completions and snapshots alive (hard case 5, see
+  Progress → History).
+
+Extra mock routes: `POST /api/lms/users`, `PATCH /api/lms/users/{id}`,
+`PATCH|DELETE /api/lms/courses/{id}`, `POST /api/lms/courses/{id}/enrol`,
+`PATCH|DELETE /api/lms/enrolments/{id}`, `POST /api/lms/courses/{id}/remove-role`,
+`POST /api/lms/submissions/{id}/revert`, `PATCH /api/lms/activities/{id}`,
+`POST /api/lms/courses/{id}/unenrol-self`, `GET /api/lms/my-requests`.
+
 ## 5. Business rules encoded (evidence per rule)
 
 1. Account must be confirmed before first login; suspension refuses sign-in
@@ -130,6 +154,18 @@ Mock routes: `GET /api/lms/activities/{id}/submissions · attempts`,
     its teacher. [Course_request], [Course_creator_role]
 14. Role assignment ≠ enrolment: teachers appear under "My courses" via role,
     badge "teaching", without any enrolment row. [Assign_roles]
+15. Self-unenrol is per-method: only a self-enrolment path may be
+    self-removed (`enrol/self:unenrolself`); other paths refuse. [Enrolment_FAQ]
+16. Suspend ≠ unenrol: suspension blocks access and keeps every scrap of
+    data; unenrolment ends access but completions/grade history survive. [Manual_enrolment]
+17. Cohort-owned paths resist manual edits — the next sync recreates them;
+    the fix is cohort membership, not the roster. [Enrolment_methods]
+18. Reverting a submission to draft unlocks editing without erasing the
+    recorded grade. [Assignment_settings]
+19. Admin-created accounts skip email confirmation — that gate exists only
+    for self-registration. [Email-based_self-registration]
+20. Deleting a course never deletes the record that people finished it —
+    completions and snapshots outlive the course (hard case 5). [Course_completion]
 
 ## 6. Deliberate divergences & not-replicated (honesty section)
 

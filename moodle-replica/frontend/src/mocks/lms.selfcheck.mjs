@@ -84,4 +84,45 @@ const er = call("POST", "/api/lms/courses/4/enrol-request", { user_id: 6, messag
 call("POST", `/api/lms/enrol-requests/${er.id}/approve`, { actor_id: 1 });
 assert.ok(ENROLMENTS.some((e) => e.user_id === 6 && e.method_id === 46));
 
+// -- teacher roster management: manual enrol, suspend, unenrol, demote
+refuses(403, () => call("POST", "/api/lms/courses/1/enrol", { actor_id: 3, user_id: 9, role_id: 4 })); // non-editing can't enrol
+call("POST", "/api/lms/courses/1/enrol", { actor_id: 2, user_id: 9, role_id: 3 }); // Ghada in as TA
+const ghadaPath = ENROLMENTS.find((e) => e.user_id === 9);
+call("PATCH", `/api/lms/enrolments/${ghadaPath.id}`, { actor_id: 2, status: "suspended" });
+assert.equal(ghadaPath.status, "suspended");
+call("PATCH", `/api/lms/enrolments/${ghadaPath.id}`, { actor_id: 2, status: "active" });
+refuses(403, () => call("PATCH", "/api/lms/enrolments/62", { actor_id: 2, status: "suspended" })); // cohort path owned by sync
+call("POST", "/api/lms/courses/1/remove-role", { actor_id: 2, user_id: 9, role_id: 3 });
+assert.ok(!ROLE_ASSIGNMENTS.some((a) => a.user_id === 9 && a.role_id === 3), "TA role removed");
+call("DELETE", "/api/lms/enrolments/" + ghadaPath.id, null, { actor_id: "2" });
+assert.ok(!ENROLMENTS.includes(ghadaPath), "path unenrolled");
+
+// -- revert to draft unlocks, keeps the grade
+const graded = call("POST", "/api/lms/submissions/82/revert", { actor_id: 2 });
+assert.equal(graded.status, "draft");
+assert.equal(graded.grade, 86, "revert keeps the grade on record");
+
+// -- activity visibility: non-editing refused, editing toggles
+refuses(403, () => call("PATCH", "/api/lms/activities/101", { actor_id: 3, visible: false }));
+call("PATCH", "/api/lms/activities/101", { actor_id: 2, visible: false });
+const actsHidden = call("GET", "/api/lms/courses/1/activities", null, { user_id: "7" });
+assert.ok(!actsHidden.some((a) => a.id === 101), "hidden activity vanishes for students");
+call("PATCH", "/api/lms/activities/101", { actor_id: 2, visible: true });
+
+// -- admin: create user (usable immediately), suspend, course lifecycle
+refuses(403, () => call("POST", "/api/lms/users", { actor_id: 2, username: "x", first_name: "X", last_name: "Y", password: "p" }));
+const staff = call("POST", "/api/lms/users", { actor_id: 1, username: "check.staff", first_name: "Sana", last_name: "Staff", password: "pw" });
+call("POST", "/api/auth/login", { username: "check.staff", password: "pw" }); // no confirm gate for admin-created
+refuses(409, () => call("PATCH", "/api/lms/users/1", { actor_id: 1, suspended: true })); // no self-lockout
+call("PATCH", `/api/lms/users/${staff.id}`, { actor_id: 1, suspended: true });
+refuses(403, () => call("POST", "/api/auth/login", { username: "check.staff", password: "pw" }));
+call("PATCH", `/api/lms/users/${staff.id}`, { actor_id: 1, suspended: false });
+
+call("PATCH", "/api/lms/courses/4", { actor_id: 1, visible: false });
+assert.equal(call("GET", "/api/lms/catalog", null, { user_id: "7" }).some((r) => r.course.id === 4), false, "hidden course leaves the catalog");
+call("PATCH", "/api/lms/courses/4", { actor_id: 1, visible: true });
+refuses(403, () => call("DELETE", "/api/lms/courses/4", null, { actor_id: "2" })); // teachers cannot delete
+const del = call("DELETE", "/api/lms/courses/4", null, { actor_id: "1" });
+assert.ok(del.note.includes("snapshots survive") || del.note.includes("hard case 5"));
+
 console.log(`lms self-check OK — ${USERS.length} users, ${ENROLMENTS.length} enrolments in final state`);
