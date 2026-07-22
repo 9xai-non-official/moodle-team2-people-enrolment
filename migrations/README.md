@@ -20,6 +20,26 @@ python3 migrations/verify.py             # acceptance + regression checks (§19/
 `verify.py` creates its fixtures inside a transaction and rolls back, so it is
 safe to run against any database — it leaves nothing behind.
 
+To stand up a database the backend test suite can use:
+
+```bash
+python3 migrations/apply.py --with-fixtures
+```
+
+That applies the migrations, then `moodle-replica/backend/fixtures.sql` (demo
+personas), in that order — config before demo data, per M09.4. It then
+re-asserts the D-SEED corrections, because fixtures run *after* M09 and a
+fixture that re-granted `course:view` or `site:accessallgroups` would silently
+undo the fix. The runner fails loudly if that ever happens.
+
+**Known gap:** this still does not make `tests/test_enrolment.py` pass. Those
+tests reference `demo_alice`, `demo_bob` and `DEMO-CS101` by hardcoded id, and
+**no SQL file in this repo creates those rows** — `fixtures.sql:3` says
+explicitly that they are teammates' rows which it leaves untouched. They exist
+only in the deployed Supabase database, created by hand. Until either those
+fixtures are added here or the tests look their subjects up by name instead of
+by id, that suite cannot run in CI. See §20 "Hermeticity".
+
 Local PG17 for testing:
 
 ```bash

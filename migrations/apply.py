@@ -41,6 +41,48 @@ def discover() -> list[tuple[str, Path]]:
     return found
 
 
+FIXTURES = MIGRATIONS_DIR.parent / "moodle-replica" / "backend" / "fixtures.sql"
+
+
+async def apply_fixtures(conn) -> bool:
+    """Apply the demo personas, then re-assert the D-SEED corrections.
+
+    Ordering is config -> demo fixtures (work package M09.4). It matters:
+    fixtures.sql runs AFTER M09, so if it ever re-granted something M09
+    deleted, the correction would be silently undone and the seed would be
+    wrong in exactly the way the audit flagged. The check below is what stops
+    that regression from going unnoticed.
+
+    fixtures.sql is idempotent and non-destructive by construction (one DO
+    block of guarded inserts), so re-running is safe.
+    """
+    if not FIXTURES.exists():
+        print(f"  ! fixtures not found at {FIXTURES}", file=sys.stderr)
+        return False
+    async with conn.transaction():
+        await conn.execute(FIXTURES.read_text())
+    print(f"  applied {FIXTURES.name} (demo personas)")
+
+    contradictions = await conn.fetch("""
+        select r.short_name, rc.capability
+        from role_capability rc
+        join role r    on r.id = rc.role_id
+        join context c on c.id = rc.context_id
+        where c.level = 'system'
+          and (   (rc.capability = 'course:view'          and r.short_name <> 'manager')
+               or (rc.capability = 'site:accessallgroups'
+                   and r.short_name not in ('editingteacher', 'manager', 'teacher-allgroups')))
+        order by 1, 2
+    """)
+    if contradictions:
+        print("\n  FIXTURES CONTRADICT M09 (D-SEED) — these grants came back:", file=sys.stderr)
+        for r in contradictions:
+            print(f"    {r['short_name']}: {r['capability']}", file=sys.stderr)
+        return False
+    print("  ok — fixtures do not re-grant anything M09 removed")
+    return True
+
+
 async def applied_versions(conn) -> set[str]:
     exists = await conn.fetchval("select to_regclass('public.schema_migrations') is not null")
     if not exists:
@@ -53,6 +95,11 @@ async def main() -> int:
     ap.add_argument("--database-url", default=os.environ.get("DATABASE_URL"))
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--with-fixtures", action="store_true",
+        help="also apply the demo personas from moodle-replica/backend/fixtures.sql, "
+             "AFTER all migrations. Needed by test_enrolment.py and the hard-case "
+             "scripts, which reference demo rows by id. Never use in production.")
     args = ap.parse_args()
 
     if not args.database_url:
@@ -95,6 +142,10 @@ async def main() -> int:
         if not args.dry_run:
             total = await conn.fetchval("select count(*) from schema_migrations")
             print(f"\nok — {len(pending)} applied, {total} recorded in schema_migrations")
+
+        if args.with_fixtures and not args.dry_run:
+            if await apply_fixtures(conn) is False:
+                return 1
         return 0
     finally:
         await conn.close()

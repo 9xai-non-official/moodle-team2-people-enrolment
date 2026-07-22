@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app import supa as db
+from app import db
 
 router = APIRouter(prefix="/api/progress", tags=["progress"])
 
@@ -67,73 +67,128 @@ def _to_progress(row: dict) -> CourseProgress:
     )
 
 
-def _fetch(user_id: int | None = None, course_id: int | None = None) -> list[dict]:
-    params = {"select": "*", "order": "course_id"}
+def _normalise(row: dict) -> dict:
+    """Keep the row shape the PostgREST layer used to return.
+
+    asyncpg gives real datetimes where PostgREST gave ISO-8601 strings, and
+    CourseProgress.time_completed is typed `str | None`. Converting here means
+    the swap is a pure data-access change and none of the logic below moves.
+    """
+    out = dict(row)
+    ts = out.get("time_completed")
+    if isinstance(ts, datetime):
+        out["time_completed"] = ts.isoformat()
+    return out
+
+
+async def _fetch(user_id: int | None = None, course_id: int | None = None) -> list[dict]:
+    """Read v_course_progress through the asyncpg pool.
+
+    Was `supa.select("v_course_progress", ...)` over PostgREST with the
+    RLS-bypassing service_role key. That layer is retired (work package §12):
+    one data layer, real transactions, and errors that map to the {reason}
+    contract instead of a bare 500.
+
+    NOTE for Mahdi — M03 added three columns to this view: `percent`
+    (clamped, authoritative), `is_complete`, and `enrolled`. `_to_progress`
+    still derives its own percentage below; the two now agree, because the
+    view finally computes both sides over one tracked set. `enrolled` is the
+    T2-PRG-005 gate and is NOT yet applied here — filtering the default
+    endpoint on it is your call, not the data layer's.
+    """
+    where, args = [], []
     if user_id is not None:
-        params["user_id"] = f"eq.{user_id}"
+        args.append(user_id)
+        where.append(f"user_id = ${len(args)}")
     if course_id is not None:
-        params["course_id"] = f"eq.{course_id}"
-    return db.select("v_course_progress", params)
+        args.append(course_id)
+        where.append(f"course_id = ${len(args)}")
+    clause = f"where {' and '.join(where)}" if where else ""
+    rows = await db.fetch_all(
+        f"select * from v_course_progress {clause} order by course_id", *args
+    )
+    return [_normalise(r) for r in rows]
 
 
 # --- read ----------------------------------------------------------------------
 
 @router.get("", response_model=CourseProgress)
-def get_progress(user_id: int, course_id: int):
+async def get_progress(user_id: int, course_id: int):
     """Progress for one user in one course (both mechanisms combined)."""
-    rows = _fetch(user_id=user_id, course_id=course_id)
+    rows = await _fetch(user_id=user_id, course_id=course_id)
     if not rows:
         raise HTTPException(404, "No progress record for that user/course.")
     return _to_progress(rows[0])
 
 
 @router.get("/course/{course_id}", response_model=list[CourseProgress])
-def progress_by_course(course_id: int):
+async def progress_by_course(course_id: int):
     """Every participant's progress in a course."""
-    return [_to_progress(r) for r in _fetch(course_id=course_id)]
+    return [_to_progress(r) for r in await _fetch(course_id=course_id)]
 
 
 @router.get("/user/{user_id}", response_model=list[CourseProgress])
-def progress_by_user(user_id: int):
+async def progress_by_user(user_id: int):
     """Every course's progress for a user."""
-    return [_to_progress(r) for r in _fetch(user_id=user_id)]
+    return [_to_progress(r) for r in await _fetch(user_id=user_id)]
 
 
 # --- manual completion ---------------------------------------------------------
 
 @router.post("/complete", response_model=CourseProgress)
-def mark_complete(req: CompleteRequest):
-    """Manually mark a course complete (mechanism #2)."""
-    now = datetime.now(timezone.utc).isoformat()
-    existing = db.select(
-        "course_completion",
-        {"user_id": f"eq.{req.user_id}", "course_id": f"eq.{req.course_id}", "select": "id"},
-    )
-    if existing:
-        db.update(
-            "course_completion",
-            {"time_completed": now},
-            {"user_id": f"eq.{req.user_id}", "course_id": f"eq.{req.course_id}"},
+async def mark_complete(req: CompleteRequest):
+    """Manually mark a course complete (mechanism #2).
+
+    Now a single atomic upsert instead of a read-then-write over two PostgREST
+    round trips, which could interleave.
+
+    BEHAVIOUR CHANGE for Mahdi — M13 makes course_completion.time_completed
+    write-once at the database level. A second POST for an already-completed
+    course no longer silently rewrites the timestamp to a fresh now(); it
+    raises, and the global handler returns 409 with the trigger's message.
+    That was T2-PRG-002: re-POSTing quietly rewrote completion history.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.transaction() as conn:
+        await conn.execute(
+            "insert into course_completion (user_id, course_id, time_started, time_completed) "
+            "values ($1, $2, $3, $3) "
+            "on conflict (user_id, course_id) do update set time_completed = excluded.time_completed",
+            req.user_id, req.course_id, now,
         )
-    else:
-        db.upsert(
-            "course_completion",
-            [{
-                "user_id": req.user_id,
-                "course_id": req.course_id,
-                "time_started": now,
-                "time_completed": now,
-            }],
+        await db.audit(
+            "progress.completed",
+            affected_id=req.user_id,
+            course_id=req.course_id,
+            detail={"time_completed": now.isoformat(), "mechanism": "manual"},
+            conn=conn,
         )
-    return get_progress(req.user_id, req.course_id)
+    return await get_progress(req.user_id, req.course_id)
 
 
 @router.delete("/complete", response_model=CourseProgress)
-def unmark_complete(user_id: int, course_id: int):
-    """Undo a manual completion (clears time_completed). Calculated % is unaffected."""
-    db.update(
-        "course_completion",
-        {"time_completed": None},
-        {"user_id": f"eq.{user_id}", "course_id": f"eq.{course_id}"},
-    )
-    return get_progress(user_id, course_id)
+async def unmark_complete(user_id: int, course_id: int):
+    """Undo a manual completion (clears time_completed). Calculated % is unaffected.
+
+    BEHAVIOUR CHANGE for Mahdi — M13 blocks this too: clearing time_completed
+    is a change to a write-once column, so this endpoint now returns 409 rather
+    than silently un-completing a course.
+
+    Per M13's rationale, un-completion should become an explicit, authorised,
+    audited reset rather than a plain DELETE. The endpoint is left in place,
+    failing loudly, so the 409 is visible in testing instead of the behaviour
+    disappearing quietly. Designing the authorised reset is your call.
+    """
+    async with db.transaction() as conn:
+        await conn.execute(
+            "update course_completion set time_completed = null "
+            "where user_id = $1 and course_id = $2",
+            user_id, course_id,
+        )
+        await db.audit(
+            "progress.uncompleted",
+            affected_id=user_id,
+            course_id=course_id,
+            conn=conn,
+        )
+    return await get_progress(user_id, course_id)

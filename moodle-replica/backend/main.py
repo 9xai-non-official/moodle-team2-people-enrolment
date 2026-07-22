@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import db
+from app import db, errors
 from app.routers import users, courses, enrolment, roles, groups, progress
 from app.routers import permissions
 
@@ -43,6 +43,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Map database constraint violations onto shaped {ok:false, code, reason}
+# responses instead of bare 500s (work package §15). Registered before the
+# routers so every endpoint inherits it.
+#
+# MERGE POINT for Khaled's D-AUTH middleware — add it to the stack here.
+errors.install(app)
 
 
 @app.get("/api/health", tags=["health"])
