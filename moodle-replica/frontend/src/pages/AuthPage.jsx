@@ -27,7 +27,14 @@ export default function AuthPage() {
   function finishSignIn(me, mode = "user") {
     addUser(me.user);
     setActingUserId(me.user.id);
-    signIn({ mode, user: me.user, is_admin: me.is_admin, teaches: me.teaches, enrolled: me.enrolled });
+    signIn({
+      mode,
+      user: me.user,
+      is_admin: me.is_admin,
+      teaches: me.teaches,
+      enrolled: me.enrolled,
+      token: me.token ?? null, // Bearer for hardened endpoints (real mode)
+    });
   }
 
   async function doLogin(username, password) {

@@ -1,6 +1,12 @@
 // Every enrolment path of one user across all courses (task 06 §4.2, HC-1).
 // Before removing a cohort sync a user shows two rows into one course; after,
 // one row — membership stays continuous via the surviving path.
+//
+// VERIFIED (Phase F): the "live" column renders `r.live` straight from the
+// API, and the per-course rollup only COUNTS those server booleans to apply
+// the documented rule "in the course iff any path is live". There is no
+// client-side liveness predicate here and none should be added — the four
+// §6.2 conditions are evaluated once, server-side, in v_enrolment_detail.
 import { useEffect, useState } from "react";
 import { apiGet } from "../../api";
 import Badge from "../common/Badge";

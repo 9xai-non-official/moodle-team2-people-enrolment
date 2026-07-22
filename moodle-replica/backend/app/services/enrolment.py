@@ -57,6 +57,12 @@ ACTIVE_CONDITIONS_SQL = """
 # gate #1 by spec.
 GATES = ("course_visible", "method_enabled", "window_open", "capacity", "key_match")
 
+# Distinguishes "caller omitted this field" from "caller explicitly passed
+# None". Needed because None is a meaningful value on a PATCH: it CLEARS the
+# column. Without it, an omitted field and a null are the same request and a
+# column can only ever be set, never unset.
+_UNSET = object()
+
 
 # ---------------------------------------------------------------------------
 # db adapter — accepts either the app.db module or an asyncpg connection, so
@@ -871,24 +877,55 @@ async def create_method(db, course_id: int, method: str, *,
                           "index)"}
 
 
-async def update_method(db, method_id: int, *, status: str | None = None,
-                        default_role_id: int | None = None,
-                        enrol_start=None, enrol_end=None,
-                        config: dict | None = None) -> dict:
+async def update_method(db, method_id: int, *, status=_UNSET,
+                        default_role_id=_UNSET,
+                        enrol_start=_UNSET, enrol_end=_UNSET,
+                        config=_UNSET) -> dict:
     """Enable / disable / configure. Disabling FREEZES every enrolment through
-    this instance (they fail condition 2) without touching their rows (§6.2)."""
-    row = await _one(db, """
+    this instance (they fail condition 2) without touching their rows (§6.2).
+
+    Only the fields the caller actually passes are written. That distinction
+    matters: this used to build `enrol_start = coalesce($4, enrol_start)`, so a
+    NULL meant "leave it alone" and an enrolment window, once set, could never
+    be cleared through the API — PATCH returned 200 and silently changed
+    nothing. Omitting a field still means "leave it"; passing None now means
+    "clear it".
+
+    Callers that pass a subset of kwargs are unaffected. The router passes
+    `model_dump(exclude_unset=True)`, so an absent JSON key and an explicit
+    null are no longer the same request.
+    """
+    sets, args = [], [method_id]
+
+    def assign(column, value):
+        args.append(value)
+        sets.append(f"{column} = ${len(args)}")
+
+    if status is not _UNSET:
+        assign("status", status)
+    if default_role_id is not _UNSET:
+        assign("default_role_id", default_role_id)
+    if enrol_start is not _UNSET:
+        assign("enrol_start", enrol_start)
+    if enrol_end is not _UNSET:
+        assign("enrol_end", enrol_end)
+    if config is not _UNSET:
+        args.append(json.dumps(config) if config is not None else None)
+        sets.append(f"config = ${len(args)}::jsonb")
+
+    if not sets:                       # nothing asked for — report current row
+        row = await _one(db, "select * from enrolment_method where id = $1",
+                         method_id)
+        return ({"ok": True, "method": row} if row else
+                {"ok": False, "reason": f"method {method_id} not found"})
+
+    sets.append("updated_at = now()")
+    row = await _one(db, f"""
         update enrolment_method
-           set status          = coalesce($2, status),
-               default_role_id = coalesce($3, default_role_id),
-               enrol_start     = coalesce($4, enrol_start),
-               enrol_end       = coalesce($5, enrol_end),
-               config          = coalesce($6::jsonb, config),
-               updated_at      = now()
+           set {', '.join(sets)}
          where id = $1
         returning *
-    """, method_id, status, default_role_id, enrol_start, enrol_end,
-        json.dumps(config) if config is not None else None)
+    """, *args)
     if row is None:
         return {"ok": False, "reason": f"method {method_id} not found"}
     return {"ok": True, "method": row}

@@ -3,6 +3,7 @@
 // nav is scoped to the person's roles. mode "explore": the original demo
 // behaviour — no sign-in, persona switcher drives everything.
 import { createContext, useContext, useState } from "react";
+import { setApiAuthToken } from "../api";
 
 const KEY = "session";
 
@@ -15,7 +16,9 @@ const SessionContext = createContext({
 export function SessionProvider({ children }) {
   const [session, setSession] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(KEY)) ?? null;
+      const s = JSON.parse(localStorage.getItem(KEY)) ?? null;
+      setApiAuthToken(s?.token); // restore Bearer on refresh
+      return s;
     } catch {
       return null;
     }
@@ -23,10 +26,12 @@ export function SessionProvider({ children }) {
 
   const signIn = (s) => {
     localStorage.setItem(KEY, JSON.stringify(s));
+    setApiAuthToken(s?.token);
     setSession(s);
   };
   const signOut = () => {
     localStorage.removeItem(KEY);
+    setApiAuthToken(null);
     setSession(null);
   };
 

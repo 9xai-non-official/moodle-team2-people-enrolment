@@ -26,6 +26,7 @@ function UsersTab({ actorId }) {
       .then((rows) => setManagerIds(new Set(rows.filter((r) => r.role?.short_name === "manager").map((r) => r.user?.id))))
       .catch(() => {});
   };
+  const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -34,7 +35,7 @@ function UsersTab({ actorId }) {
     setError(null);
     try {
       await apiPost(`/api/lms/users/${u.id}/toggle-manager`, { actor_id: actorId });
-      load();
+      reload();
     } catch (err) {
       setError(err);
     }
@@ -48,7 +49,7 @@ function UsersTab({ actorId }) {
       setCreated(u);
       setForm({});
       setCreating(false);
-      load();
+      reload();
     } catch (err) {
       setError(err);
     }
@@ -58,7 +59,7 @@ function UsersTab({ actorId }) {
     setError(null);
     try {
       await apiPatch(`/api/lms/users/${u.id}`, { actor_id: actorId, suspended: !u.suspended });
-      load();
+      reload();
     } catch (err) {
       setError(err);
     }
@@ -172,6 +173,7 @@ function CoursesTab({ actorId }) {
 
   const load = () =>
     apiGet("/api/courses?include_deleted=1").then(setCourses).catch(setError);
+  const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -182,7 +184,7 @@ function CoursesTab({ actorId }) {
     try {
       await apiPost("/api/lms/courses", { actor_id: actorId, ...form });
       setForm({});
-      load();
+      reload();
     } catch (err) {
       setError(err);
     }
@@ -193,7 +195,7 @@ function CoursesTab({ actorId }) {
     setNote(null);
     try {
       await fn();
-      load();
+      reload();
     } catch (err) {
       setError(err);
     }

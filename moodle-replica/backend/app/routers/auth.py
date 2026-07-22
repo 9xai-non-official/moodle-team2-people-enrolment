@@ -17,6 +17,7 @@ import os
 from fastapi import APIRouter, HTTPException
 
 from app import db
+from app.services.auth import issue_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -96,7 +97,15 @@ async def login(body: dict):
         raise HTTPException(status_code=403, detail={"reasons": [
             "this account is suspended site-wide — sign-in refused, exactly like "
             "Moodle; enrolments and grades are kept"]})
-    return await _me_summary(user)
+    session = await _me_summary(user)
+    # Hardened routers (roles/permissions) authenticate via Bearer, not the
+    # interim X-Acting-User header — hand the UI a real token at sign-in.
+    try:
+        session["token"] = issue_token(
+            user["id"], username=user["username"], ttl_seconds=86_400)
+    except RuntimeError:
+        session["token"] = None  # AUTH_SECRET unset (bare dev) — header-only mode
+    return session
 
 
 @router.post("/signup", status_code=201)

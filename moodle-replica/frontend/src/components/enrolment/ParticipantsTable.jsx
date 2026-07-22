@@ -1,8 +1,13 @@
 // The flagship roster (task 06 §4.2). Status badge shows effective_status
 // exactly as the API returns it — no client-side status logic. Row actions act
 // per enrolment PATH, not per user: a user with two ways in gets two clusters.
+//
+// LIVENESS IS NEVER COMPUTED HERE. `path.live` is the server's own answer to
+// the four §6.2 conditions (schemas_enrolment.py:82) and `effective_status` is
+// the folded badge value. Both are read, never re-derived — a second liveness
+// rule in the client is exactly the drift this table exists to avoid.
 import { useEffect, useState } from "react";
-import { apiGet, apiPatch, apiDelete } from "../../api";
+import { apiGet, apiPatch, apiDelete, ApiError } from "../../api";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import DataTable from "../common/DataTable";
@@ -23,6 +28,22 @@ const STATUS_TITLE = {
 };
 
 const fmtAccess = (iso) => (iso ? new Date(iso).toLocaleDateString() : "never");
+
+// An active cohort path is owned by the cohort sync, not by the operator:
+// deleting the row by hand just means the next sync puts it back (HC-01).
+// The correct lever is removing the person from the cohort, or disabling the
+// method instance. Both inputs are the SERVER's — p.method and p.live — so
+// this is reading the contract, not re-deriving liveness.
+//
+// NOTE: this is a UI guard only. The backend does not currently refuse a
+// cohort-path unenrol (services/enrolment.py:unenrol_user removes by
+// component+item_id whatever the method), so a direct API call still goes
+// through. Backend refusal + reason is requested in the handover.
+const isSyncOwnedPath = (p) => p.method === "cohort" && p.live;
+const SYNC_OWNED_REASON =
+  "This path is maintained by the cohort sync — removing it here would be " +
+  "undone on the next sync. Remove the user from the cohort, or disable the " +
+  "method instance, instead.";
 
 export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) {
   const { setActingUserId } = useActingUser();
@@ -73,7 +94,15 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
           setTimeout(() => setLastChanged(null), 900); // clears the flash class
         }
       })
-      .catch((e) => setActionError(e.message))
+      .catch((e) =>
+        // Show the server's own reason, not just the transport message —
+        // a 409 "user is not enrolled via this method" is the useful half.
+        setActionError(
+          e instanceof ApiError && e.reasons?.length
+            ? e.reasons.join(" · ")
+            : e.message,
+        ),
+      )
       .finally(() => setBusy(false));
   };
 
@@ -192,8 +221,8 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
             )}
             <button
               className="btn btn--danger"
-              title={`${p.method} path`}
-              disabled={busy}
+              title={isSyncOwnedPath(p) ? SYNC_OWNED_REASON : `${p.method} path`}
+              disabled={busy || isSyncOwnedPath(p)}
               onClick={() =>
                 window.confirm(
                   `Unenrol this ${p.method} path?\n\nIf it's their last path they ` +
@@ -204,6 +233,11 @@ export default function ParticipantsTable({ courseId, onOpenUser, onNavigate }) 
             >
               Unenrol
             </button>
+            {isSyncOwnedPath(p) && (
+              <span className="muted" title={SYNC_OWNED_REASON}>
+                sync-managed
+              </span>
+            )}
           </div>
         )),
     },

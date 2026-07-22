@@ -14,6 +14,7 @@ import os
 import pathlib
 import re
 
+import asyncpg
 import pytest
 from dotenv import dotenv_values
 
@@ -36,11 +37,83 @@ CS101 = 3                   # seeded demo course — READ ONLY in these tests
 STUDENT_ROLE = 4
 
 
+# --------------------------------------------------------------------------
+# Test isolation (against the SHARED live team DB). Every scenario cleans up
+# in its own `finally`, but a crash mid-test — or a second test run touching
+# the same scratch identities — can leave ALICE/BOB enrolled on LAB1, which
+# then trips a later test's assertions non-deterministically. So we snapshot
+# LAB1's *seeded* methods ONCE at import and hard-scrub anything beyond that
+# baseline (plus ALICE/BOB's LAB1 enrolments/roles and scratch cohorts) BEFORE
+# every test — each test starts from a guaranteed-clean slate regardless of
+# what a previous run left behind. (The real fix is hermetic per-run DBs, §20.)
+# --------------------------------------------------------------------------
+
+def _lab1_ctx():
+    if not _ENV_URL:
+        return None
+    async def go():
+        conn = await asyncpg.connect(_ENV_URL, statement_cache_size=0, timeout=30)
+        try:
+            row = await conn.fetchrow(
+                "select id from context where level = 'course' and instance_id = $1",
+                LAB1)
+            return row["id"] if row else None
+        finally:
+            await conn.close()
+    return asyncio.run(go())
+
+
+_LAB1_CTX = _lab1_ctx()
+
+
+async def _scrub_scratch():
+    """Restore LAB1 to its seeded state before a test runs, so a prior test's
+    leftover can never affect this one. Deterministic (does NOT rely on the DB
+    being clean at import time): fixtures.sql seeds LAB1 with exactly ONE manual
+    method, so keep the lowest-id manual method and delete everything else on
+    LAB1, then clear ALICE/BOB from the kept method + their enrol roles + scratch
+    cohorts."""
+    if not _ENV_URL:
+        return
+    conn = await asyncpg.connect(_ENV_URL, statement_cache_size=0, timeout=30)
+    try:
+        seeded = await conn.fetchval(
+            "select id from enrolment_method where course_id = $1 "
+            "and method = 'manual' order by id limit 1", LAB1)
+        rows = await conn.fetch(
+            "select id from enrolment_method where course_id = $1", LAB1)
+        for mid in (r["id"] for r in rows if r["id"] != seeded):
+            await conn.execute(
+                "delete from role_assignment where item_id = $1 "
+                "and component like 'enrol_%'", mid)
+            await conn.execute(
+                "delete from enrolment_method where id = $1", mid)  # cascades enrolment
+        if seeded is not None:
+            await conn.execute(
+                "delete from enrolment where user_id = any($1::bigint[]) "
+                "and method_id = $2", [ALICE, BOB], seeded)
+        if _LAB1_CTX is not None:
+            await conn.execute(
+                "delete from role_assignment where user_id = any($1::bigint[]) "
+                "and context_id = $2 and component like 'enrol_%'",
+                [ALICE, BOB], _LAB1_CTX)
+        await conn.execute(
+            "delete from user_last_access where user_id = any($1::bigint[]) "
+            "and course_id = $2", [ALICE, BOB], LAB1)
+        await conn.execute(
+            "delete from cohort where id_number like 'SCRATCH%' "
+            "or name like 'scratch%'")
+    finally:
+        await conn.close()
+
+
 def run(coro):
-    """Each test gets a fresh loop + pool (asyncpg pools are loop-bound)."""
+    """Each test gets a fresh loop + pool (asyncpg pools are loop-bound), and a
+    clean scratch slate (pre-test isolation scrub)."""
     if _ENV_URL:
         os.environ["DATABASE_URL"] = _ENV_URL
     async def wrapped():
+        await _scrub_scratch()          # isolation: clean slate before the test
         await db.connect()
         try:
             return await coro
