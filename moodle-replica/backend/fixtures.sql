@@ -6,11 +6,12 @@
 do $$
 declare
   u_admin bigint; u_tala bigint; u_tariq bigint; u_aya bigint; u_salma bigint;
-  u_majd bigint; u_basel bigint; u_sami bigint;
+  u_majd bigint; u_basel bigint; u_sami bigint; u_creator bigint; u_siteteacher bigint;
   c_cs bigint; c_math bigint; c_hist bigint; c_lab bigint;
   ctx_sys bigint; ctx_cs bigint; ctx_math bigint; ctx_lab bigint;
   a_assign bigint; a_quiz bigint; a_forum bigint; a_ws bigint;
   r_manager bigint; r_edit bigint; r_teacher bigint; r_student bigint; r_allg bigint;
+  r_creator bigint;
   coh bigint; m_manual bigint; m_self bigint; m_cohort bigint; m_math_manual bigint;
   m_math_self bigint; m_lab bigint;
   g_a bigint; g_b bigint; g_obs bigint; grp bigint;
@@ -20,6 +21,7 @@ begin
   select id into r_edit    from role where short_name = 'editingteacher';
   select id into r_teacher from role where short_name = 'teacher';
   select id into r_student from role where short_name = 'student';
+  select id into r_creator from role where short_name = 'coursecreator';  -- M19
 
   -- extra role + capability the permission demos need (idempotent adds)
   insert into role (short_name, name, description, archetype, sort_order)
@@ -48,7 +50,9 @@ begin
     ('student.a',     'salma@demo.io',    'Salma', 'Saleh',  false),
     ('student.multi', 'majd@demo.io',     'Majd',  'Masri',  false),
     ('student.b',     'basel@demo.io',    'Basel', 'Badr',   false),
-    ('student.susp',  'sami@demo.io',     'Sami',  'Suheil', true)
+    ('student.susp',  'sami@demo.io',     'Sami',  'Suheil', true),
+    ('creator1',      'creator1@demo.io', 'Cora',  'Creator',    false),
+    ('siteteacher1',  'steach@demo.io',   'Sana',  'Siteteacher',false)
   on conflict (username) do nothing;
   select id into u_admin from app_user where username = 'admin1';
   select id into u_tala  from app_user where username = 'teacher.a';
@@ -58,6 +62,8 @@ begin
   select id into u_majd  from app_user where username = 'student.multi';
   select id into u_basel from app_user where username = 'student.b';
   select id into u_sami  from app_user where username = 'student.susp';
+  select id into u_creator     from app_user where username = 'creator1';
+  select id into u_siteteacher from app_user where username = 'siteteacher1';
 
   -- courses (external_ref is the idempotency key) ---------------------------
   insert into course (external_ref, short_name, full_name, visible, group_mode, force_group_mode) values
@@ -189,7 +195,12 @@ begin
     (u_sami,  r_student, ctx_cs,   '', m_manual),
     (u_majd,  r_student, ctx_math, '', m_math_manual),
     (u_basel, r_student, ctx_math, '', m_math_self),
-    (u_salma, r_student, ctx_lab,  '', m_lab)
+    (u_salma, r_student, ctx_lab,  '', m_lab),
+    -- T2-ROLES demos: a Course creator and a SITE-level editing teacher, both
+    -- at system context so they can create courses (course:create is checked
+    -- there). A course-scoped editing teacher (u_tala @ ctx_cs) still cannot.
+    (u_creator,     r_creator, ctx_sys, '', 0),
+    (u_siteteacher, r_edit,    ctx_sys, '', 0)
   on conflict (user_id, role_id, context_id, component, item_id) do nothing;
 
   -- group membership (HC-4: majd in A and B; provenance on salma) -----------

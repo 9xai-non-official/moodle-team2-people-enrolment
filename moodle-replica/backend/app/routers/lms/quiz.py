@@ -88,6 +88,24 @@ async def _teaches(pid: int, course_id: int) -> bool:
     return row is not None
 
 
+EDITING_ROLES = ("editingteacher", "manager")
+
+
+async def _teaches_editing(pid: int, course_id: int) -> bool:
+    """EDITING staff only — non-editing teachers grade, they never add or edit
+    activities (the whole point of the role; mirrors the mock's refusal)."""
+    row = await db.fetch_one(
+        "select 1 from role_assignment ra "
+        "join role r on r.id = ra.role_id "
+        "join context c on c.id = ra.context_id "
+        "where ra.user_id = $1 and r.short_name = any($3::text[]) "
+        "and ((c.level = 'course' and c.instance_id = $2) or c.level = 'system') "
+        "limit 1",
+        pid, course_id, list(EDITING_ROLES),
+    )
+    return row is not None
+
+
 async def _access_all_groups(pid: int, course_id: int) -> bool:
     """Resolve moodle/site:accessallgroups through Khaled's engine (admin bypass
     included). Fails safe to the admin check if the engine can't be consulted."""
@@ -550,8 +568,10 @@ async def create_activity(course_id: int, body: dict = Body(default=None),
     """Create an activity (TeachingPage -> Content). Staff only. For a quiz, also
     creates its settings + questions (correct answers stay server-side)."""
     body = body or {}
-    if not await _teaches(principal["id"], course_id):
-        raise HTTPException(status_code=403, detail="only teaching staff may add activities here")
+    if not await _teaches_editing(principal["id"], course_id):
+        raise HTTPException(status_code=403, detail={"reasons": [
+            "non-editing teachers may grade but not add or edit activities "
+            "(that's the whole point of the role)"]})
     if not await db.fetch_one("select id from course where id = $1 and deleted_at is null", course_id):
         raise HTTPException(status_code=404, detail=f"course {course_id} not found")
     name = (body.get("name") or "").strip()
@@ -584,8 +604,10 @@ async def update_activity(activity_id: int, body: dict = Body(default=None),
     """Edit an activity (rename / show-hide / quiz attempts) — staff only."""
     body = body or {}
     act = await _activity(activity_id)
-    if not await _teaches(principal["id"], act["course_id"]):
-        raise HTTPException(status_code=403, detail="only teaching staff may edit this activity")
+    if not await _teaches_editing(principal["id"], act["course_id"]):
+        raise HTTPException(status_code=403, detail={"reasons": [
+            "non-editing teachers may grade but not add or edit activities "
+            "(that's the whole point of the role)"]})
     sets, args, n = [], [], 1
     if body.get("name"):
         n += 1; sets.append(f"name = ${n}"); args.append(body["name"].strip())
