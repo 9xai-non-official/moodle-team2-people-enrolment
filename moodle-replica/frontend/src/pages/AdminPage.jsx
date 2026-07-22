@@ -14,15 +14,31 @@ const errText = (e) => (e.reasons?.length ? e.reasons : [e.message]);
 
 function UsersTab({ actorId }) {
   const [users, setUsers] = useState([]);
+  const [managerIds, setManagerIds] = useState(new Set());
   const [form, setForm] = useState({});
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
   const [created, setCreated] = useState(null);
 
-  const load = () => apiGet("/api/users").then(setUsers).catch(setError);
+  const load = () => {
+    apiGet("/api/users").then(setUsers).catch(setError);
+    apiGet("/api/roles/assignments?context_id=1")
+      .then((rows) => setManagerIds(new Set(rows.filter((r) => r.role?.short_name === "manager").map((r) => r.user?.id))))
+      .catch(() => {});
+  };
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function toggleManager(u) {
+    setError(null);
+    try {
+      await apiPost(`/api/lms/users/${u.id}/toggle-manager`, { actor_id: actorId });
+      load();
+    } catch (err) {
+      setError(err);
+    }
+  }
 
   async function create(e) {
     e.preventDefault();
@@ -102,9 +118,25 @@ function UsersTab({ actorId }) {
                   <Badge variant={u.suspended ? "red" : "green"}>
                     {u.suspended ? "suspended" : "active"}
                   </Badge>
+                  {managerIds.has(u.id) && (
+                    <Badge variant="blue" title="Manager at System — sees and may do everything">
+                      manager
+                    </Badge>
+                  )}
                 </td>
                 <td>
                   <div className="cell-actions">
+                    <button
+                      className="btn btn--sm"
+                      title={
+                        managerIds.has(u.id)
+                          ? "Revoke the manager role (you cannot revoke your own)"
+                          : "Grant the Manager role at System context — full site powers"
+                      }
+                      onClick={() => toggleManager(u)}
+                    >
+                      {managerIds.has(u.id) ? "revoke manager" : "make manager"}
+                    </button>
                     <button
                       className={`btn btn--sm ${u.suspended ? "" : "btn--danger"}`}
                       title={
@@ -239,14 +271,20 @@ function CoursesTab({ actorId }) {
   );
 }
 
-export default function AdminPage() {
+export default function AdminPage({ onNavigate }) {
   const { actingUser } = useActingUser();
   const [me, setMe] = useState(null);
   const [tab, setTab] = useState("Users");
+  const [stats, setStats] = useState(null);
+  const [pendingRequests, setPendingRequests] = useState(0);
 
   useEffect(() => {
     if (!actingUser) return;
     apiGet(`/api/auth/me?user_id=${actingUser.id}`).then(setMe).catch(() => setMe(null));
+    apiGet("/api/stats").then(setStats).catch(() => {});
+    apiGet(`/api/lms/course-requests?actor_id=${actingUser.id}`)
+      .then((rows) => setPendingRequests(rows.filter((r) => r.status === "pending").length))
+      .catch(() => {});
   }, [actingUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!actingUser || !me) return null;
@@ -266,6 +304,22 @@ export default function AdminPage() {
     <div>
       <h1>Admin</h1>
       <PageIntro line="Accounts and courses, site-wide — every other power stays with the page that owns it." />
+      <div className="form-row">
+        {stats && (
+          <span className="muted">
+            {stats.users} users · {stats.courses} courses · {stats.enrolments} enrolments
+          </span>
+        )}
+        {pendingRequests > 0 && (
+          <button
+            className="btn btn--sm"
+            title="Decide them on Teaching → New course"
+            onClick={() => onNavigate?.("Teaching")}
+          >
+            🔔 {pendingRequests} course request{pendingRequests > 1 ? "s" : ""} pending →
+          </button>
+        )}
+      </div>
       <Tabs tabs={["Users", "Courses"]} active={tab} onChange={setTab} />
       {tab === "Users" && <UsersTab actorId={actingUser.id} />}
       {tab === "Courses" && <CoursesTab actorId={actingUser.id} />}
