@@ -303,6 +303,52 @@ export const routes = [
     },
   },
   {
+    // Moodle-faithful: only a SELF-enrolled path may be self-removed
+    // (enrol/self:unenrolself). Manual/cohort paths refuse with the reason.
+    // Completions and grades survive — unenrolment never rewrites the past.
+    method: "POST",
+    pattern: /^\/api\/lms\/courses\/(\d+)\/unenrol-self$/,
+    handler: (m, body) => {
+      const course = courseById(Number(m[1]));
+      const userId = Number(body.user_id);
+      if (!course || !userById(userId)) throw new ApiError(404, { detail: "unknown course or user" });
+      const paths = ENROLMENTS.map((e) => ({ e, mm: METHODS.find((x) => x.id === e.method_id) })).filter(
+        ({ e, mm }) => e.user_id === userId && mm && mm.course_id === course.id,
+      );
+      if (!paths.length) throw new ApiError(409, { detail: "you are not enrolled in this course" });
+      const selfPaths = paths.filter(({ mm }) => mm.method === "self");
+      if (!selfPaths.length)
+        throw new ApiError(403, {
+          reasons: [
+            `your enrolment here was created by ${paths.map(({ mm }) => mm.method).join(" + ")} — only self-enrolled students may unenrol themselves (enrol/self:unenrolself); ask your teacher`,
+          ],
+        });
+      for (const { e, mm } of selfPaths) {
+        ENROLMENTS.splice(ENROLMENTS.indexOf(e), 1);
+        const ra = ROLE_ASSIGNMENTS.find(
+          (a) => a.user_id === userId && a.component === "enrol_self" && a.item_id === mm.id,
+        );
+        if (ra) ROLE_ASSIGNMENTS.splice(ROLE_ASSIGNMENTS.indexOf(ra), 1);
+      }
+      const still = paths.length > selfPaths.length;
+      return {
+        unenrolled: !still,
+        note: still
+          ? "self-enrolment path removed — other enrolment paths keep you in this course (any-active wins)"
+          : "unenrolled — your completions and grades are kept; re-enrol any time and they return",
+      };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/lms\/my-requests$/,
+    handler: (m, body, query) =>
+      ENROL_REQUESTS.filter((r) => r.user_id === Number(query.user_id)).map((r) => ({
+        ...r,
+        course: courseById(r.course_id),
+      })),
+  },
+  {
     method: "POST",
     pattern: /^\/api\/lms\/courses\/(\d+)\/enrol-request$/,
     handler: (m, body) => {

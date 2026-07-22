@@ -60,14 +60,27 @@ export default function DashboardPage({ onNavigate }) {
   const { session } = useSession();
   const explore = session?.mode === "explore";
   const allowed = navFor(session); // students never get dead links to hidden pages
+  // Site-wide counts are staff furniture — a student's dashboard is THEIR
+  // world: courses, progress, and what they're still waiting on.
+  const plainStudent =
+    session?.mode === "user" && !session.is_admin && !(session.teaches?.length > 0);
   const [stats, setStats] = useState(null);
   const [statsError, setStatsError] = useState(null);
   const [overview, setOverview] = useState([]);
   const [overviewError, setOverviewError] = useState(null);
+  const [myRequests, setMyRequests] = useState([]);
 
   useEffect(() => {
+    if (plainStudent) return;
     apiGet("/api/stats").then(setStats).catch((e) => setStatsError(e.message));
-  }, []);
+  }, [plainStudent]);
+
+  useEffect(() => {
+    if (!plainStudent || !actingUser) return;
+    apiGet(`/api/lms/my-requests?user_id=${actingUser.id}`)
+      .then(setMyRequests)
+      .catch(() => setMyRequests([]));
+  }, [plainStudent, actingUser]);
 
   useEffect(() => {
     if (!actingUser) return;
@@ -83,7 +96,13 @@ export default function DashboardPage({ onNavigate }) {
   return (
     <div>
       <h1>Dashboard</h1>
-      <PageIntro line="You are somebody — try being someone else, then explore your world." />
+      <PageIntro
+        line={
+          explore
+            ? "You are somebody — try being someone else, then explore your world."
+            : "Your world at a glance — everything here is scoped to you."
+        }
+      />
 
       {/* TRY BEING SOMEONE ELSE — the hero in explore mode: everything
           downstream depends on who you are, so the switch leads. Signed-in
@@ -139,23 +158,56 @@ export default function DashboardPage({ onNavigate }) {
 
       {explore && <FirstFiveMinutes onNavigate={onNavigate} />}
 
-      {/* HERE'S YOUR WORLD — counts (each opens its page), your progress, and
-          the section jumps. */}
-      <h2>Your world</h2>
-      {statsError && <div className="error-banner">{statsError}</div>}
-      <div className="grid-cards">
-        {["users", "courses", "enrolments", "groups"].map((k) => (
-          <button
-            className="card card--stat"
-            key={k}
-            title={allowed.includes(STAT_NAV[k]) ? `Open ${STAT_NAV[k]} →` : undefined}
-            onClick={() => allowed.includes(STAT_NAV[k]) && onNavigate(STAT_NAV[k])}
-          >
-            <div className="card__number">{stats ? stats[k] : "…"}</div>
-            <div className="card__label">{k}</div>
-          </button>
-        ))}
-      </div>
+      {/* HERE'S YOUR WORLD — staff see site counts; a student sees what
+          THEY are waiting on and where to go next. */}
+      {plainStudent ? (
+        <>
+          {myRequests.length > 0 && (
+            <>
+              <h2>My enrolment requests</h2>
+              {myRequests.map((r) => (
+                <div className="form-row" key={r.id}>
+                  <strong>{r.course?.short_name}</strong>
+                  <span className="muted">“{r.message}”</span>
+                  <Badge
+                    variant={r.status === "pending" ? "blue" : r.status === "approved" ? "green" : "red"}
+                  >
+                    {r.status === "pending" ? "waiting for a teacher" : r.status}
+                  </Badge>
+                </div>
+              ))}
+            </>
+          )}
+          <div className="grid-cards">
+            <button className="card card--link" onClick={() => onNavigate("Courses")}>
+              <div className="card__title">My courses →</div>
+              <span className="muted">continue working, or find a new course</span>
+            </button>
+            <button className="card card--link" onClick={() => onNavigate("Progress")}>
+              <div className="card__title">My progress →</div>
+              <span className="muted">what counts, and how far you are</span>
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <h2>Your world</h2>
+          {statsError && <div className="error-banner">{statsError}</div>}
+          <div className="grid-cards">
+            {["users", "courses", "enrolments", "groups"].map((k) => (
+              <button
+                className="card card--stat"
+                key={k}
+                title={allowed.includes(STAT_NAV[k]) ? `Open ${STAT_NAV[k]} →` : undefined}
+                onClick={() => allowed.includes(STAT_NAV[k]) && onNavigate(STAT_NAV[k])}
+              >
+                <div className="card__number">{stats ? stats[k] : "…"}</div>
+                <div className="card__label">{k}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <h2>My progress {actingUser && <small>— {actingUser.full_name}</small>}</h2>
       {overviewError && <div className="error-banner">{overviewError}</div>}
@@ -181,19 +233,23 @@ export default function DashboardPage({ onNavigate }) {
         ))}
       </div>
 
-      <h2>Sections</h2>
-      <div className="grid-cards">
-        {SECTIONS.filter((s) => allowed.includes(s.name)).map((s) => (
-          <button
-            key={s.name}
-            className="card card--link section-card"
-            onClick={() => onNavigate(s.name)}
-          >
-            <span>{s.name} →</span>
-            {s.stat && stats && <span className="muted">{stats[s.stat]}</span>}
-          </button>
-        ))}
-      </div>
+      {!plainStudent && (
+        <>
+          <h2>Sections</h2>
+          <div className="grid-cards">
+            {SECTIONS.filter((s) => allowed.includes(s.name)).map((s) => (
+              <button
+                key={s.name}
+                className="card card--link section-card"
+                onClick={() => onNavigate(s.name)}
+              >
+                <span>{s.name} →</span>
+                {s.stat && stats && <span className="muted">{stats[s.stat]}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

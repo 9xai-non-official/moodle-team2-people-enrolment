@@ -105,6 +105,7 @@ function CourseView({ course, userId, onBack }) {
   const [activities, setActivities] = useState(null);
   const [open, setOpen] = useState(null); // activity in focus
   const [error, setError] = useState(null);
+  const [leave, setLeave] = useState(null); // null | "confirm" | {note} | ApiError
 
   useEffect(() => {
     setOpen(null);
@@ -113,11 +114,56 @@ function CourseView({ course, userId, onBack }) {
       .catch((e) => setError(e));
   }, [course.id, userId]);
 
+  async function unenrol() {
+    try {
+      const res = await apiPost(`/api/lms/courses/${course.id}/unenrol-self`, { user_id: userId });
+      setLeave(res);
+    } catch (e) {
+      setLeave(e);
+    }
+  }
+
   return (
     <div>
-      <button className="btn" onClick={onBack}>
-        ← All courses
-      </button>
+      <div className="form-row">
+        <button className="btn" onClick={onBack}>
+          ← All courses
+        </button>
+        <span style={{ flex: 1 }} />
+        <button
+          className="btn btn--danger"
+          title="Only self-enrolled paths can be self-removed (enrol/self:unenrolself) — completions survive either way"
+          onClick={() => setLeave("confirm")}
+        >
+          Unenrol me
+        </button>
+      </div>
+      {leave === "confirm" && (
+        <div className="panel panel--attention">
+          <div className="panel__title">Leave {course.short_name}?</div>
+          <p className="muted">
+            Your completions and grades are kept — unenrolment never rewrites
+            the past. Re-enrol any time and they return.
+          </p>
+          <div className="form-row">
+            <button className="btn btn--danger" onClick={unenrol}>
+              Yes, unenrol me
+            </button>
+            <button className="btn" onClick={() => setLeave(null)}>
+              Stay
+            </button>
+          </div>
+        </div>
+      )}
+      {leave?.reasons?.length > 0 && <ReasonList reasons={leave.reasons} />}
+      {leave?.note && (
+        <div className="panel">
+          <p>{leave.note}</p>
+          <button className="btn" onClick={onBack}>
+            Back to catalog →
+          </button>
+        </div>
+      )}
       <h2>
         {course.full_name} <span className="muted">({course.short_name})</span>
       </h2>
@@ -190,7 +236,16 @@ export default function CatalogPage() {
 
   if (!actingUser) return null;
   if (openCourse)
-    return <CourseView course={openCourse} userId={actingUser.id} onBack={() => setOpenCourse(null)} />;
+    return (
+      <CourseView
+        course={openCourse}
+        userId={actingUser.id}
+        onBack={() => {
+          setOpenCourse(null);
+          load();
+        }}
+      />
+    );
 
   const mine = rows?.filter((r) => r.my_status || r.teaching) ?? [];
   const others = rows?.filter((r) => !r.my_status && !r.teaching) ?? [];
