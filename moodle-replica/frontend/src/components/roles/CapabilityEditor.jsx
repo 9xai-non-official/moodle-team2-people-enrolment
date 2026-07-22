@@ -14,7 +14,6 @@ const PERMISSIONS = [
   { value: "prevent", label: "Prevent" },
   { value: "prohibit", label: "Prohibit" },
 ];
-const SYSTEM_CONTEXT_ID = 1;
 
 export default function CapabilityEditor() {
   const [roles, setRoles] = useState([]);
@@ -53,7 +52,9 @@ export default function CapabilityEditor() {
       .catch((e) => setError(e.message));
   }
 
-  const atSystem = contextId === SYSTEM_CONTEXT_ID;
+  // System context id comes from the DB (serial, not always 1).
+  const systemContextId = contexts.find((c) => c.level === "system")?.id;
+  const atSystem = contextId === systemContextId;
   const columns = [
     { key: "capability", label: "Capability" },
     {

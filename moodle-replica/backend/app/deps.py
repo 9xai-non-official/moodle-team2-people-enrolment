@@ -40,6 +40,10 @@ async def current_user(x_acting_user: int | None = Header(default=None)) -> dict
     )
     if row is None or row["deleted"]:
         raise HTTPException(status_code=401, detail=f"unknown principal {x_acting_user}")
+    if row["suspended"]:
+        # Docstring promises "neither deleted nor suspended"; the guard omitted
+        # the suspended check, letting a suspended account reach every gated route.
+        raise HTTPException(status_code=403, detail=f"account {x_acting_user} is suspended")
     return row
 
 

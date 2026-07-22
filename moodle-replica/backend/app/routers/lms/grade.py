@@ -105,7 +105,18 @@ async def _group_ok(actor_id: int, course_id: int, target_id: int, activity_id: 
     try:
         ctx = await course_context_id(course_id)
     except HTTPException:
-        return True  # no course context to resolve scope against — don't block
+        # No course context to resolve scope against. This is a WRITE gate, so
+        # fail CLOSED (was fail-open): permit only if the actor genuinely shares
+        # a group with the target — mirrors quiz.py's _grade_gate fallback so a
+        # context-less course can't let a group-scoped teacher grade anyone.
+        row = await db.fetch_one(
+            "select 1 from group_member gm1 "
+            "join course_group cg on cg.id = gm1.group_id and cg.course_id = $3 "
+            "join group_member gm2 on gm2.group_id = gm1.group_id "
+            "where gm1.user_id = $1 and gm2.user_id = $2 limit 1",
+            actor_id, target_id, course_id,
+        )
+        return row is not None
     try:
         decision = await permissions.check(
             db, actor_id, CAP_COURSE_VIEW, ctx,

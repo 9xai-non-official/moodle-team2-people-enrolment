@@ -40,9 +40,17 @@ CAP_ROLE_ASSIGN = "role:assign"            # add/remove a course role
 CAP_VIEW_PARTICIPANTS = "course:viewparticipants"
 
 # Roles a teacher may hand out (below their own): non-editing teacher, student.
-# Anything above (manager, editing teacher) is admin-only — mirrors the mock and
-# the permissions ALLOW_ASSIGN matrix (editingteacher → [teacher, student]).
-_TEACHER_GRANTABLE_ROLE_IDS = (3, 4)
+# Anything above (manager, editing teacher) is admin-only — mirrors the
+# permissions ALLOW_ASSIGN matrix (editingteacher → [teacher, student]).
+# Resolved by short_name, NOT by literal id: role ids are serial (insert order)
+# and are not a contract — everything else in the codebase resolves by name.
+_TEACHER_GRANTABLE_SHORT_NAMES = ("teacher", "student")
+
+
+async def _teacher_grantable(role_id: int) -> bool:
+    """True if a non-admin teacher may hand out `role_id`, resolved from the DB."""
+    sn = await db.fetch_val("select short_name from role where id = $1", role_id)
+    return sn in _TEACHER_GRANTABLE_SHORT_NAMES
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +220,7 @@ async def enrol_user(course_id: int,
             409, "manual enrolment is disabled in this course — enable it first")
 
     role_id = body.get("role_id") or method["default_role_id"]
-    if role_id is not None and role_id not in _TEACHER_GRANTABLE_ROLE_IDS \
+    if role_id is not None and not await _teacher_grantable(role_id) \
             and not await _is_admin(principal["id"]):
         raise HTTPException(
             403, "a teacher may only enrol with roles below their own "

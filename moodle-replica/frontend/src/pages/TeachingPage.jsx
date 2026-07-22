@@ -28,7 +28,8 @@ function RosterTab({ course, actorId, onNavigate }) {
   const [assigning, setAssigning] = useState(null); // user being promoted
   const [enrolOpen, setEnrolOpen] = useState(false);
   const [enrolUserId, setEnrolUserId] = useState("");
-  const [enrolRoleId, setEnrolRoleId] = useState(4);
+  const [roles, setRoles] = useState([]);
+  const [enrolRoleId, setEnrolRoleId] = useState("");
 
   function load() {
     setError(null);
@@ -38,11 +39,18 @@ function RosterTab({ course, actorId, onNavigate }) {
       .catch(() => setRequests([]));
     apiGet("/api/roles/contexts").then(setContexts).catch(() => {});
     apiGet("/api/users").then(setAllUsers).catch(() => {});
+    // Roles resolved by short_name from the DB — ids are serial, not a contract.
+    apiGet("/api/roles").then((rs) => {
+      setRoles(rs);
+      setEnrolRoleId((cur) => cur || rs.find((r) => r.short_name === "student")?.id || "");
+    }).catch(() => {});
   }
   const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
   useEffect(load, [course.id, actorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const courseCtx = contexts.find((c) => c.level === "course" && c.instance_id === course.id);
+  const studentRoleId = roles.find((r) => r.short_name === "student")?.id;
+  const teacherRoleId = roles.find((r) => r.short_name === "teacher")?.id;
   const enrolledIds = new Set(rows.map((r) => r.user_id));
   const enrollable = allUsers.filter((u) => !enrolledIds.has(u.id));
 
@@ -92,7 +100,7 @@ function RosterTab({ course, actorId, onNavigate }) {
       await apiPost(`/api/lms/courses/${course.id}/remove-role`, {
         actor_id: actorId,
         user_id: userId,
-        role_id: 3,
+        role_id: teacherRoleId,
       });
       reload();
     } catch (e) {
@@ -103,12 +111,12 @@ function RosterTab({ course, actorId, onNavigate }) {
   async function promote(userId) {
     setError(null);
     try {
-      // role 3 = non-editing teacher; the assignable matrix on the server
-      // refuses anything the actor's own role may not grant.
+      // non-editing teacher role (resolved by short_name); the assignable
+      // matrix on the server refuses anything the actor's own role may not grant.
       await apiPost("/api/roles/assignments", {
         actor_id: actorId,
         user_id: userId,
-        role_id: 3,
+        role_id: teacherRoleId,
         context_id: courseCtx?.id,
       });
       setAssigning(null);
@@ -160,8 +168,8 @@ function RosterTab({ course, actorId, onNavigate }) {
               ))}
             </select>
             <select className="select" value={enrolRoleId} onChange={(e) => setEnrolRoleId(e.target.value)}>
-              <option value={4}>as student</option>
-              <option value={3}>as non-editing teacher</option>
+              {studentRoleId && <option value={studentRoleId}>as student</option>}
+              {teacherRoleId && <option value={teacherRoleId}>as non-editing teacher</option>}
             </select>
             <button className="btn btn--primary" disabled={!enrolUserId} onClick={enrolUser}>
               Enrol

@@ -252,14 +252,22 @@ async def _ensure_tracking(user_id: int, course_id: int) -> None:
 
 async def _criteria(course_id: int) -> tuple[set[int], str]:
     """(required_activity_ids, aggregation). Reads the D-CRIT tables; falls back
-    to the Moodle default (ALL completion-enabled, non-deleted activities)."""
-    aggregation = await db.fetch_val(
-        "select aggregation from course_completion_setting where course_id=$1", course_id
-    ) or "all"
-    rows = await db.fetch_all(
-        "select activity_id from completion_criteria where course_id=$1", course_id
-    )
-    required = {r["activity_id"] for r in rows}
+    to the Moodle default (ALL completion-enabled, non-deleted activities).
+
+    If the D-CRIT tables aren't present yet, degrade to the default rather than
+    500 — same graceful-degradation contract the snapshot paths use, so a normal
+    activity-completion write never fails on a missing migration.
+    """
+    try:
+        aggregation = await db.fetch_val(
+            "select aggregation from course_completion_setting where course_id=$1", course_id
+        ) or "all"
+        rows = await db.fetch_all(
+            "select activity_id from completion_criteria where course_id=$1", course_id
+        )
+        required = {r["activity_id"] for r in rows}
+    except asyncpg.UndefinedTableError:
+        aggregation, required = "all", set()
     if not required:
         acts = await db.fetch_all(
             "select id from course_activity "

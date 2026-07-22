@@ -22,8 +22,16 @@ function UsersTab({ actorId }) {
 
   const load = () => {
     apiGet("/api/users").then(setUsers).catch(setError);
-    apiGet("/api/roles/assignments?context_id=1")
-      .then((rows) => setManagerIds(new Set(rows.filter((r) => r.role?.short_name === "manager").map((r) => r.user?.id))))
+    // Resolve the system context from the DB (its id is serial, not always 1)
+    // before reading manager assignments there.
+    apiGet("/api/roles/contexts")
+      .then((ctxs) => {
+        const sys = (ctxs || []).find((c) => c.level === "system");
+        if (!sys) return;
+        return apiGet(`/api/roles/assignments?context_id=${sys.id}`).then((rows) =>
+          setManagerIds(new Set(rows.filter((r) => r.role?.short_name === "manager").map((r) => r.user?.id)))
+        );
+      })
       .catch(() => {});
   };
   const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
