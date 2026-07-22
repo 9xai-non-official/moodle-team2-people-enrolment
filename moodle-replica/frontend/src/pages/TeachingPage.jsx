@@ -19,7 +19,7 @@ const errText = (e) => (e.reasons?.length ? e.reasons : [e.message]);
 
 // ---- Roster: participants, enrolment requests, role promotion -----------
 
-function RosterTab({ course, actorId }) {
+function RosterTab({ course, actorId, onNavigate }) {
   const [rows, setRows] = useState([]);
   const [requests, setRequests] = useState([]);
   const [contexts, setContexts] = useState([]);
@@ -193,7 +193,18 @@ function RosterTab({ course, actorId }) {
                   {p.effective_status?.replace("_", " ")}
                 </Badge>
               </td>
-              <td>{p.groups.map((g) => g.name).join(", ") || <span className="muted">—</span>}</td>
+              <td>
+                {p.groups.map((g) => g.name).join(", ") || <span className="muted">—</span>}{" "}
+                {onNavigate && (
+                  <button
+                    className="btn btn--sm cell-actions"
+                    title="Group membership lives on the Groups board — same course stays selected"
+                    onClick={() => onNavigate("Groups")}
+                  >
+                    manage →
+                  </button>
+                )}
+              </td>
               <td>
                 <div className="cell-actions">
                   {!p.roles.includes("teacher") && !p.roles.includes("editingteacher") && (
@@ -291,6 +302,9 @@ function ContentTab({ course, actorId, session }) {
   const [questions, setQuestions] = useState([EMPTY_Q()]);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
+  const [editing, setEditing] = useState(null); // activity id being renamed
+  const [editName, setEditName] = useState("");
+  const [editAttempts, setEditAttempts] = useState(3);
 
   function load() {
     apiGet(`/api/lms/courses/${course.id}/activities?user_id=${actorId}`).then(setActivities).catch(() => {});
@@ -331,29 +345,89 @@ function ContentTab({ course, actorId, session }) {
       <h3>Activities in {course.short_name}</h3>
       {activities.map((a) => (
         <div className="form-row" key={a.id}>
-          <span>
-            {a.activity_type === "quiz" ? "🧪" : a.activity_type === "assign" ? "📄" : "▫️"} {a.name}
-          </span>
-          {!a.visible && <Badge variant="grey">hidden from students</Badge>}
-          <button
-            className="btn btn--sm"
-            title={
-              a.visible
-                ? "Hide: the activity stops existing for students, instantly"
-                : "Show it to students again"
-            }
-            onClick={async () => {
-              setError(null);
-              try {
-                await apiPatch(`/api/lms/activities/${a.id}`, { actor_id: actorId, visible: !a.visible });
-                load();
-              } catch (e) {
-                setError(e);
-              }
-            }}
-          >
-            {a.visible ? "hide" : "show"}
-          </button>
+          {editing === a.id ? (
+            <>
+              <input
+                className="input"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                autoFocus
+              />
+              {a.activity_type === "quiz" && (
+                <label>
+                  attempts{" "}
+                  <input
+                    className="input input--num"
+                    type="number"
+                    min={1}
+                    value={editAttempts}
+                    onChange={(e) => setEditAttempts(e.target.value)}
+                  />
+                </label>
+              )}
+              <button
+                className="btn btn--sm btn--primary"
+                onClick={async () => {
+                  setError(null);
+                  try {
+                    await apiPatch(`/api/lms/activities/${a.id}`, {
+                      actor_id: actorId,
+                      name: editName,
+                      attempts_allowed: a.activity_type === "quiz" ? editAttempts : undefined,
+                    });
+                    setEditing(null);
+                    load();
+                  } catch (e) {
+                    setError(e);
+                  }
+                }}
+              >
+                save
+              </button>
+              <button className="btn btn--sm" onClick={() => setEditing(null)}>
+                cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {a.activity_type === "quiz" ? "🧪" : a.activity_type === "assign" ? "📄" : "▫️"} {a.name}
+              </span>
+              {!a.visible && <Badge variant="grey">hidden from students</Badge>}
+              <div className="cell-actions">
+                <button
+                  className="btn btn--sm"
+                  title="Rename (and for quizzes, change the attempt limit)"
+                  onClick={() => {
+                    setEditing(a.id);
+                    setEditName(a.name);
+                    setEditAttempts(3);
+                  }}
+                >
+                  ✏️ edit
+                </button>
+                <button
+                  className="btn btn--sm"
+                  title={
+                    a.visible
+                      ? "Hide: the activity stops existing for students, instantly"
+                      : "Show it to students again"
+                  }
+                  onClick={async () => {
+                    setError(null);
+                    try {
+                      await apiPatch(`/api/lms/activities/${a.id}`, { actor_id: actorId, visible: !a.visible });
+                      load();
+                    } catch (e) {
+                      setError(e);
+                    }
+                  }}
+                >
+                  {a.visible ? "hide" : "show"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ))}
 
@@ -536,13 +610,21 @@ function GradingTab({ course, actorId }) {
   return (
     <>
       <div className="form-row">
-        {activities.map((a) => (
-          <button key={a.id} className={`btn ${activity?.id === a.id ? "btn--primary" : ""}`} onClick={() => open(a)}>
-            {a.activity_type === "quiz" ? "🧪" : "📄"} {a.name}
-          </button>
-        ))}
+        {activities.map((a) => {
+          const pending = (a.queue?.pending_submissions ?? 0) + (a.queue?.pending_essays ?? 0);
+          return (
+            <button key={a.id} className={`btn ${activity?.id === a.id ? "btn--primary" : ""}`} onClick={() => open(a)}>
+              {a.activity_type === "quiz" ? "🧪" : "📄"} {a.name}
+              {pending > 0 && (
+                <Badge variant="amber" title="waiting for your marking">
+                  {pending}
+                </Badge>
+              )}
+            </button>
+          );
+        })}
       </div>
-      {!activity && <p className="muted">Pick an activity to grade.</p>}
+      {!activity && <p className="muted">Pick an activity to grade — amber counts are waiting on you.</p>}
 
       {activity?.activity_type === "assign" &&
         subs.map((s) => (
@@ -752,7 +834,7 @@ function NewCourseTab({ actorId, isAdmin }) {
 
 // ---- page shell ----------------------------------------------------------
 
-export default function TeachingPage() {
+export default function TeachingPage({ onNavigate }) {
   const { actingUser } = useActingUser();
   const { session } = useSession();
   const { courseId, setCourseId } = useSelectedCourse();
@@ -801,7 +883,9 @@ export default function TeachingPage() {
         </label>
       </div>
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
-      {tab === "Roster" && course && <RosterTab course={course} actorId={actingUser.id} />}
+      {tab === "Roster" && course && (
+        <RosterTab course={course} actorId={actingUser.id} onNavigate={onNavigate} />
+      )}
       {tab === "Content" && course && <ContentTab course={course} actorId={actingUser.id} session={session} />}
       {tab === "Grading" && course && <GradingTab course={course} actorId={actingUser.id} />}
       {tab === "New course" && <NewCourseTab actorId={actingUser.id} isAdmin={me.is_admin} />}

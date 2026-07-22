@@ -3,7 +3,7 @@
 // whole app's thesis is that everything depends on who you are); seeded counts,
 // your progress and the section jumps follow as "your world".
 import { useEffect, useState } from "react";
-import { apiGet } from "../api";
+import { apiGet, apiPatch } from "../api";
 import { fetchOverview } from "../lib/progressApi";
 import { useActingUser } from "../context/ActingUser";
 import { useSession } from "../context/Session";
@@ -11,7 +11,63 @@ import { navFor } from "./index";
 import Badge from "../components/common/Badge";
 import PageIntro from "../components/common/PageIntro";
 import FirstFiveMinutes from "../components/common/FirstFiveMinutes";
+import ReasonList from "../components/common/ReasonList";
 import { PERSONAS, personaLabel } from "../lib/personas";
+
+// Own-account maintenance — name + password, right on the dashboard.
+// Any signed-in role; explore mode doesn't own an account to edit.
+function ProfileEditor({ user }) {
+  const { addUser } = useActingUser();
+  const { session, signIn } = useSession();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({});
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save(e) {
+    e.preventDefault();
+    setError(null);
+    setSaved(false);
+    try {
+      const updated = await apiPatch("/api/auth/profile", {
+        user_id: user.id,
+        first_name: form.first_name || undefined,
+        last_name: form.last_name || undefined,
+        current_password: form.current_password,
+        new_password: form.new_password || undefined,
+      });
+      addUser(updated);
+      signIn({ ...session, user: updated });
+      setSaved(true);
+      setForm({});
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  return (
+    <div className="panel">
+      <button className="panel__title panel__toggle" onClick={() => setOpen((v) => !v)}>
+        ⚙️ My account {open ? "▾" : "▸"}
+      </button>
+      {open && (
+        <form onSubmit={save}>
+          <div className="form-row">
+            <input className="input" placeholder={user.first_name} value={form.first_name ?? ""} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
+            <input className="input" placeholder={user.last_name} value={form.last_name ?? ""} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
+          </div>
+          <div className="form-row">
+            <input className="input" type="password" placeholder="Current password" autoComplete="current-password" value={form.current_password ?? ""} onChange={(e) => setForm((f) => ({ ...f, current_password: e.target.value }))} />
+            <input className="input" type="password" placeholder="New password (optional)" autoComplete="new-password" value={form.new_password ?? ""} onChange={(e) => setForm((f) => ({ ...f, new_password: e.target.value }))} />
+            <button className="btn btn--primary">Save</button>
+          </div>
+          {saved && <p className="muted">✓ saved</p>}
+          {error && <ReasonList reasons={error.reasons?.length ? error.reasons : [error.message]} />}
+        </form>
+      )}
+    </div>
+  );
+}
 
 // After a switch, point the user at the page where that persona's story is most
 // visible. Presentational navigation hint only — no permission logic here.
@@ -69,6 +125,7 @@ export default function DashboardPage({ onNavigate }) {
   const [overview, setOverview] = useState([]);
   const [overviewError, setOverviewError] = useState(null);
   const [myRequests, setMyRequests] = useState([]);
+  const [myGrades, setMyGrades] = useState([]);
 
   useEffect(() => {
     if (plainStudent) return;
@@ -80,6 +137,9 @@ export default function DashboardPage({ onNavigate }) {
     apiGet(`/api/lms/my-requests?user_id=${actingUser.id}`)
       .then(setMyRequests)
       .catch(() => setMyRequests([]));
+    apiGet(`/api/lms/my-grades?user_id=${actingUser.id}`)
+      .then(setMyGrades)
+      .catch(() => setMyGrades([]));
   }, [plainStudent, actingUser]);
 
   useEffect(() => {
@@ -156,6 +216,7 @@ export default function DashboardPage({ onNavigate }) {
         </p>
       )}
 
+      {!explore && actingUser && <ProfileEditor user={actingUser} />}
       {explore && <FirstFiveMinutes onNavigate={onNavigate} />}
 
       {/* HERE'S YOUR WORLD — staff see site counts; a student sees what
@@ -188,6 +249,21 @@ export default function DashboardPage({ onNavigate }) {
               <span className="muted">what counts, and how far you are</span>
             </button>
           </div>
+          {myGrades.length > 0 && (
+            <>
+              <h2>My grades</h2>
+              {myGrades.map((g, i) => (
+                <div className="form-row" key={i}>
+                  <Badge variant="neutral">{g.course}</Badge>
+                  <span>{g.activity}</span>
+                  <Badge variant="green">
+                    {g.score}/{g.max}
+                  </Badge>
+                  {g.feedback && <span className="muted">“{g.feedback}”</span>}
+                </div>
+              ))}
+            </>
+          )}
         </>
       ) : (
         <>

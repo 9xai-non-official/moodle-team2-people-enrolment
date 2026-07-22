@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 
+import asyncpg
+
 from app import db
 
 # Effective group modes (mirror the DB enum `group_mode` = 'none'|'separate'|'visible').
@@ -475,24 +477,40 @@ async def add_member(group_id: int, user_id: int, component: str = "", item_id: 
     passes `enrol_self`/`enrol_cohort` + the method id. The client body carries
     only {user_id} (schemas_groups.MemberAdd, extra='forbid'), so a forged
     component can never reach here over HTTP (Moodle group/lib.php:77-101).
-    SA-GRP-004 enrolment guard and GRP-036 on-conflict-do-nothing preserved."""
+    SA-GRP-004 enrolment guard and GRP-036 on-conflict-do-nothing preserved.
+
+    Enrolment-guard race (D-GM): the `_is_active_enrolled` check below and the
+    INSERT are two steps. A concurrent unenrol landing in that gap would, with
+    the check alone, leave an orphan membership for a now-unenrolled user. The
+    merged D-GM contract makes the DATABASE enforce the guard atomically with
+    the insert, so the check is only a friendly fast path; the constraint is the
+    correctness guarantee. A lost race trips the guard and we return the same
+    not-enrolled refusal instead of persisting the orphan."""
     course_id = await _group_course_id(group_id)
     if course_id is None:
         return {"ok": False, "reason": "group does not exist"}
     if not await _is_active_enrolled(user_id, course_id):
         return {"ok": False, "reason": "user has no active enrolment in this course"}
-    await db.fetch_one(
-        """
-        insert into group_member (group_id, user_id, component, item_id)
-        values ($1, $2, $3, $4)
-        on conflict (group_id, user_id) do nothing
-        returning group_id
-        """,
-        group_id,
-        user_id,
-        component,
-        item_id,
-    )
+    try:
+        await db.fetch_one(
+            """
+            insert into group_member (group_id, user_id, component, item_id)
+            values ($1, $2, $3, $4)
+            on conflict (group_id, user_id) do nothing
+            returning group_id
+            """,
+            group_id,
+            user_id,
+            component,
+            item_id,
+        )
+    except (asyncpg.ForeignKeyViolationError, asyncpg.RaiseError,
+            asyncpg.CheckViolationError):
+        # D-GM guard rejected the row: the enrolment was removed between the
+        # check above and this insert. No orphan is committed — surface the
+        # same refusal the pre-check would have.
+        return {"ok": False, "raced": True,
+                "reason": "user has no active enrolment in this course"}
     await _audit("group.member_added", actor_id=actor_id, affected_id=user_id,
                  course_id=course_id, detail={"group_id": group_id, "component": component})
     return {"ok": True, "group_id": group_id, "user_id": user_id, "component": component}

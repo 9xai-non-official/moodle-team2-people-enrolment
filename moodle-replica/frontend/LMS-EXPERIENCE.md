@@ -125,6 +125,16 @@ Walking each role's story A→Z surfaced gaps; all fixed and gate-tested:
   — deletion keeps completions and snapshots alive (hard case 5, see
   Progress → History).
 
+Iterations 5–17 (refinement loops): own-profile editing (`PATCH
+/api/auth/profile` — password change requires the current one), "My grades"
+strip (`GET /api/lms/my-grades`), catalog search, roster → Groups-board
+hand-off, activity rename + quiz attempt-limit editing, teacher marking-queue
+badges (never sent to students), Admin overview strip + **make/revoke
+manager** (`POST /api/lms/users/{id}/toggle-manager`, no self-lockout),
+password autocomplete/show-toggle, ARIA labels, mobile layout (sidebar
+becomes a top strip under 760px), dark-mode parity, presenter/glossary
+coverage.
+
 Extra mock routes: `POST /api/lms/users`, `PATCH /api/lms/users/{id}`,
 `PATCH|DELETE /api/lms/courses/{id}`, `POST /api/lms/courses/{id}/enrol`,
 `PATCH|DELETE /api/lms/enrolments/{id}`, `POST /api/lms/courses/{id}/remove-role`,

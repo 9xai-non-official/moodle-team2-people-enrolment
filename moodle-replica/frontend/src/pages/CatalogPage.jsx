@@ -225,6 +225,7 @@ export default function CatalogPage() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [openCourse, setOpenCourse] = useState(null);
+  const [q, setQ] = useState("");
 
   function load() {
     if (!actingUser) return;
@@ -247,14 +248,31 @@ export default function CatalogPage() {
       />
     );
 
-  const mine = rows?.filter((r) => r.my_status || r.teaching) ?? [];
-  const others = rows?.filter((r) => !r.my_status && !r.teaching) ?? [];
+  const match = (r) =>
+    !q ||
+    r.course.short_name.toLowerCase().includes(q.toLowerCase()) ||
+    r.course.full_name.toLowerCase().includes(q.toLowerCase());
+  const mine = rows?.filter((r) => (r.my_status || r.teaching) && match(r)) ?? [];
+  const others = rows?.filter((r) => !r.my_status && !r.teaching && match(r)) ?? [];
 
   return (
     <div>
       <h1>Courses</h1>
       <PageIntro line="Your courses first, then the catalog — with a real way IN to each course, not Moodle's dead end." />
       {error && <div className="error-banner">{error.message}</div>}
+
+      <div className="form-row">
+        <input
+          className="input input--wide"
+          placeholder="🔍 Search courses…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Search courses"
+        />
+      </div>
+      {q && mine.length + others.length === 0 && (
+        <p className="muted">Nothing matches “{q}” — try a shorter search.</p>
+      )}
 
       <h2>My courses</h2>
       {mine.length === 0 && (
