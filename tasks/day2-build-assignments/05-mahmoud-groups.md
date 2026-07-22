@@ -4,7 +4,7 @@
 **Branch:** feature branch `feat/mahmoud-groups` cut from `staging`, PR back into `staging`.
 **App location (staging branch):** `moodle-replica/`
 **Depends on:** Issa's database bootstrap PR merged; Yaman's `services/enrolment.py` merged (you need `is_active_enrolled`). Frontend is Issa's (file 06) — you provide APIs and review his Groups page.
-**Source of truth:** `TEAM2-MASTER-REFERENCE.md` §10 (groups), §12, §13 (HC 3–4), your findings in `notes/groups-groupings.md` (rules GRP-001/002/006/012) and your task guide `tasks/mahmoud-groups-groupings-task-guide.md`.
+**Source of truth:** `TEAM2-MASTER-REFERENCE.md` §10 (groups), §12, §13 (HC 3–4), your findings in `notes/groups-groupings.md` (rules GRP-001/002/006/012) and your task guide `tasks/day1-testing/03-mahmoud-groups-task-guide.md`.
 
 ---
 

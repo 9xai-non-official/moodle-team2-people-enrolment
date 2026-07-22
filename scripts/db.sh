@@ -2,9 +2,9 @@
 # Query the local Moodle DB without retyping connection details.
 # Credentials are read from Moodle's config.php at runtime — nothing secret is stored here.
 #
-#   ./db.sh "SELECT * FROM mdl_user_enrolments"     one-off query, table output
-#   ./db.sh                                          interactive shell
-#   ./db.sh -f queries/enrolment.sql                 run a file
+#   ./scripts/db.sh "SELECT * FROM mdl_user_enrolments"     one-off query, table output
+#   ./scripts/db.sh                                          interactive shell
+#   ./scripts/db.sh -f queries/enrolment.sql                 run a file
 #
 # Instance: Moodle 5.3dev (alpha) via Moodle4Mac / MAMP.  Table prefix: mdl_
 set -euo pipefail

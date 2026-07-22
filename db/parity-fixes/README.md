@@ -6,8 +6,8 @@ what ran. The theme: **solve whole gap-clusters at the database layer, where
 the fix cannot be bypassed** — which is precisely where Moodle is weakest
 (its integrity and events live in PHP that any code path can skip).
 
-Source gap docs: `~/Downloads/MOODLE-GAPS-NOT-SOLVED.md`,
-`~/Downloads/IMPROVEMENTS-OVER-MOODLE.md`.
+Source gap docs: [`MOODLE-GAPS-NOT-SOLVED.md`](MOODLE-GAPS-NOT-SOLVED.md),
+[`IMPROVEMENTS-OVER-MOODLE.md`](IMPROVEMENTS-OVER-MOODLE.md) — both in this folder.
 
 ---
 

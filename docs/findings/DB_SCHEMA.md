@@ -1,7 +1,7 @@
 # Team 2 — People & Enrolment · Database Schema
 
 **Live on Supabase** · project `UserRoles` (`gbzvunmywuuwfhyhsahl`) · PostgreSQL 17 · deployed 2026-07-21
-Source files: [`schema.sql`](schema.sql) (DDL) · [`seed.sql`](seed.sql) (roles/capabilities config)
+Source files: [`schema.sql`](../../schema.sql) (DDL) · [`seed.sql`](../../db/seed.sql) (roles/capabilities config)
 
 Our own model of Moodle's People & Enrolment area — same concepts, not a copy.
 Each table below names the Moodle table it descends from and why it exists.

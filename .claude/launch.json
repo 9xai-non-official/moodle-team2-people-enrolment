@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "whocan-api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd moodle-replica/backend && .venv/bin/uvicorn main:app --reload --port 8010"
+      ],
+      "port": 8010
+    },
+    {
+      "name": "whocan",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd moodle-replica/frontend && npm run dev -- --port 5173"],
+      "port": 5173
+    }
+  ]
+}
