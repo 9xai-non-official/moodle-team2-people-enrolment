@@ -125,9 +125,9 @@ export default function CompletionGrid({ courseId }) {
           <div>
             <Glyph cell={cell} />
             {cell.viewed && <span className="muted"> seen</span>}
-            <div>
+            <div className="cell-actions">
               <button
-                className="btn"
+                className="btn btn--sm"
                 disabled={viewAs || !canOverride}
                 title={!canOverride ? report.cannot_override_reason : undefined}
                 onClick={() => {
@@ -139,7 +139,7 @@ export default function CompletionGrid({ courseId }) {
                 Override
               </button>
               {own && !viewAs && (
-                <button className="btn" onClick={() => manualTick(a.id)}>
+                <button className="btn btn--sm" onClick={() => manualTick(a.id)}>
                   Tick
                 </button>
               )}

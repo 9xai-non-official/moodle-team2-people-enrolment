@@ -31,4 +31,16 @@ export const SCRIPT = {
     "'Secret Forum' column is hidden: in the report, excluded from the dashboard %.",
     "History tab: HIST9 — three years of snapshots for a course that no longer exists (hard case 5).",
   ],
+  Courses: [
+    "Sign out → create a brand-new account → confirm the mock email (Moodle's real signup gate).",
+    "Catalog: CS101 wants a key ('sesame') — MATH200 has no self-enrol, so REQUEST it (core Moodle just says 'you cannot enrol yourself').",
+    "Open CS101 → Assignment 1 → type text, attach an image, tick the statement, Submit — it locks, like Moodle.",
+    "Quiz 1 → start attempt → answer → Finish: auto-marked instantly, essay 'awaiting marking'.",
+  ],
+  Teaching: [
+    "As teacher.a: Roster tab — approve Ghada's enrolment request → she lands on the roster via manual enrol.",
+    "Promote Basel to non-editing teacher — grade-only role, assignable because it's BELOW teacher.",
+    "Grading: mark the pending essay (Tariq the scoped TA sees 'outside your groups' on Group B — hard case 3 in the grading queue).",
+    "New course tab: 'Create course directly' REFUSES for teachers (moodle/course:create) — Request instead; as admin1, approve it.",
+  ],
 };

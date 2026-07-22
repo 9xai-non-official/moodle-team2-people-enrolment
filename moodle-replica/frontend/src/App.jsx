@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { apiGet, USE_MOCKS } from "./api";
 import { ActingUserProvider, useActingUser } from "./context/ActingUser";
 import { SelectedCourseProvider } from "./context/SelectedCourse";
-import { PAGES, NAV_ITEMS } from "./pages";
+import { SessionProvider, useSession } from "./context/Session";
+import { PAGES, navFor } from "./pages";
+import AuthPage from "./pages/AuthPage";
 import WelcomeTour, { tourSeen } from "./components/common/WelcomeTour";
 import CommandPalette from "./components/common/CommandPalette";
 import PersonaStrip from "./components/common/PersonaStrip";
@@ -84,8 +86,11 @@ function PresenterCard({ page }) {
 }
 
 function Shell() {
+  const { session, signOut } = useSession();
+  const { setActingUserId } = useActingUser();
   const [active, setActive] = useState("Dashboard");
   const [health, setHealth] = useState("checking");
+  const navItems = navFor(session);
   const [tourOpen, setTourOpen] = useState(() => !tourSeen());
   const [presenter, setPresenter] = useState(
     () => localStorage.getItem("presenter") === "1",
@@ -98,16 +103,26 @@ function Shell() {
     });
   }
 
-  // Keyboard nav: 1..6 switch pages (ignored while typing in a field).
+  // Keyboard nav: 1..N switch pages (ignored while typing in a field).
   useEffect(() => {
     function onKey(e) {
       if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
       const idx = Number(e.key) - 1;
-      if (idx >= 0 && idx < NAV_ITEMS.length) setActive(NAV_ITEMS[idx]);
+      if (idx >= 0 && idx < navItems.length) setActive(navItems[idx]);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [navItems]);
+
+  // Signing out (or a role losing a page) never strands you on a dead page.
+  useEffect(() => {
+    if (!navItems.includes(active)) setActive("Dashboard");
+  }, [navItems, active]);
+
+  // Session drives identity: signed-in users ACT as themselves everywhere.
+  useEffect(() => {
+    if (session?.mode === "user" && session.user) setActingUserId(session.user.id);
+  }, [session, setActingUserId]);
 
   // Command-palette meta actions dispatch these; Shell owns the state they touch.
   useEffect(() => {
@@ -149,6 +164,8 @@ function Shell() {
     return () => document.removeEventListener("click", copyError);
   }, []);
 
+  if (!session) return <AuthPage />;
+
   const Page = PAGES[active];
 
   return (
@@ -159,7 +176,32 @@ function Shell() {
           <span className="brand__sub">people &amp; enrolment</span>
           {USE_MOCKS && <span className="mock-badge">MOCK DATA</span>}
         </div>
-        <ActingUserSelect />
+        {session.mode === "explore" ? (
+          <ActingUserSelect />
+        ) : (
+          <span className="id-chip" title="You act as yourself — sign out to switch people.">
+            <span className="id-chip__avatar" aria-hidden>
+              {(session.user?.full_name ?? "?")
+                .split(" ")
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join("")}
+            </span>
+            <span className="id-chip__meta">
+              <span className="id-chip__name">{session.user?.full_name}</span>
+              <span className="id-chip__role">
+                {session.is_admin
+                  ? "manager"
+                  : session.teaches?.length
+                    ? "teacher"
+                    : "student"}
+              </span>
+            </span>
+          </span>
+        )}
+        <button className="btn help-btn" title={session.mode === "explore" ? "Leave explore mode" : "Sign out"} onClick={signOut}>
+          ⎋
+        </button>
         <div className={`api-status api-status--${health}`}>
           <span className="dot" /> API: {health}
         </div>
@@ -178,7 +220,7 @@ function Shell() {
           ?
         </button>
       </header>
-      <PersonaStrip />
+      {session.mode === "explore" && <PersonaStrip />}
       <WelcomeTour open={tourOpen} onClose={() => setTourOpen(false)} />
       <CommandPalette onNavigate={setActive} />
       <ActivityBar />
@@ -187,7 +229,7 @@ function Shell() {
 
       <div className="app-body">
         <nav className="sidebar">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <button
               key={item}
               className={`nav-item ${active === item ? "nav-item--active" : ""}`}
@@ -208,11 +250,13 @@ function Shell() {
 
 function App() {
   return (
-    <ActingUserProvider>
-      <SelectedCourseProvider>
-        <Shell />
-      </SelectedCourseProvider>
-    </ActingUserProvider>
+    <SessionProvider>
+      <ActingUserProvider>
+        <SelectedCourseProvider>
+          <Shell />
+        </SelectedCourseProvider>
+      </ActingUserProvider>
+    </SessionProvider>
   );
 }
 

@@ -1,0 +1,8 @@
+-- BLOCKER FIX (Mahdi handoff) — load fn_can into the live DB + expose via RPC.
+-- The permission engine was defined in schema.sql but absent from Supabase, so
+-- POST /rest/v1/rpc/fn_can 404'd and every completion:override failed closed.
+-- Applied 2026-07-22 via the Supabase management API (NOT schema.sql — the team
+-- is actively editing that file). Body copied verbatim from schema.sql fn_can;
+-- followed by:  notify pgrst, 'reload schema';
+-- Verify:  select fn_can(6,'course:view',1);   -- jsonb with granted:true
+-- See fix_T2-PRG-003_D-CRIT_criteria_aggregation.sql for the criteria tables.

@@ -155,6 +155,15 @@ def resolve_capability(
 CAP_COURSE_VIEW = "course:view"  # brief: moodle/course:view — the course-door key
 CAP_ACCESS_ALL_GROUPS = "site:accessallgroups"  # brief: moodle/site:accessallgroups
 CAP_ROLE_ASSIGN = "role:assign"  # brief: moodle/role:assign — assign-UI gate
+CAP_ROLE_OVERRIDE = "role:override"  # gate for changing what a role can do (seeded)
+# Managing role DEFINITIONS (create/clone) is Moodle's moodle/role:manage — a
+# system-level capability. It is NOT in the current seed, so require_capability
+# fails CLOSED for everyone except a site admin until it is seeded (see the
+# change request). Referenced by its real Moodle short-name, never invented as data.
+CAP_ROLE_MANAGE = "role:manage"
+# Explaining a permission decision ABOUT ANOTHER USER via /check is gated behind
+# this seeded capability (staff have it, students do not); admin bypasses.
+CAP_VIEW_OTHER = "user:viewdetails"
 
 # A guest is hard-blocked from write capabilities and from anything carrying one
 # of these risks (§8.3 step 4).
@@ -384,9 +393,12 @@ ADMIN_USERNAMES = {"admin", "admin1"}
 GUEST_USERNAMES = {"guest"}
 VIRTUAL_USER_ROLE_ID = -1  # synthesized when no real 'user' role exists in the DB
 
-# permission_decision is OURS (§2) but is not in Issa's frozen schema.sql, which
-# we may not edit. We create it lazily (idempotent) the first time we log, and
-# expose the DDL so it can also be applied as a migration.
+# permission_decision is the Decision-Log sink. It is NOT in the frozen
+# schema.sql. The application MUST NOT author DDL at runtime (a schema is owned
+# by the schema owner, not created ad hoc from request handling); this DDL is
+# exported ONLY so it can be applied as a migration / change request. If the
+# table is absent, logging is best-effort and silently no-ops — the verdict
+# still stands. (Change request: add this table to schema.sql.)
 PERMISSION_DECISION_DDL = """
 create table if not exists permission_decision (
     id          bigint generated always as identity primary key,
@@ -399,8 +411,6 @@ create table if not exists permission_decision (
     decided_at  timestamptz not null default now()
 );
 """
-
-_decision_table_ready = False
 
 
 def _admin_ids_from_env() -> set[int]:
@@ -687,14 +697,10 @@ async def _gather(db, actor_id, capability, context_id, target_id, activity_id, 
 
 
 async def _log_decision(db, actor_id, capability, context_id, target_id, response):
-    """Append-only audit. Best-effort: a missing table or DB never breaks a
-    check. Creates its own table (idempotent) on first use since we may not
-    edit schema.sql."""
-    global _decision_table_ready
+    """Append-only Decision Log. Best-effort: a missing table or DB never breaks
+    a check, and the app never creates the table itself (see PERMISSION_DECISION_DDL
+    — that is a migration, not runtime DDL)."""
     try:
-        if not _decision_table_ready:
-            await db.fetch_all(PERMISSION_DECISION_DDL)
-            _decision_table_ready = True
         import json
 
         await db.fetch_one(
@@ -708,6 +714,22 @@ async def _log_decision(db, actor_id, capability, context_id, target_id, respons
         pass  # audit is best-effort; the verdict still stands
 
 
+async def _audit(db, event: str, *, actor_id=None, affected_id=None,
+                 course_id=None, context_id=None, detail: Optional[dict] = None):
+    """Write one row-event to the real audit_log table (present in schema.sql).
+    Best-effort and append-only: a missing table or DB never breaks a mutation."""
+    try:
+        import json
+
+        await db.fetch_one(
+            "insert into audit_log (event, actor_id, affected_id, course_id, context_id, detail) "
+            "values ($1,$2,$3,$4,$5,$6::jsonb) returning id",
+            event, actor_id, affected_id, course_id, context_id, json.dumps(detail or {}),
+        )
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------
 # Frozen public API (§3). Async to match the real asyncpg stack.
 # --------------------------------------------------------------------------
@@ -717,7 +739,10 @@ async def has_capability(db, user_id: int, capability: str, context_id: int,
     necessary but not sufficient — use check() for the full gated verdict."""
     db = _resolve_db(db)
     ident = await _account_and_identity(db, user_id)
-    if ident["deleted"]:
+    if ident["deleted"] or ident["suspended"]:
+        # A deleted/suspended account cannot log in, so it holds no effective
+        # capability (mirrors build_decision gate 1). This is what stops a
+        # suspended user from acting on the mutation paths that gate on this.
         return False
     cap = await _load_capability(db, capability)
     if cap is None:
@@ -732,6 +757,27 @@ async def has_capability(db, user_id: int, capability: str, context_id: int,
         return False
     cap_rows = await _load_cap_rows(db, capability, path_ids)
     return resolve_capability(path_ids, [h["role_id"] for h in held], cap_rows).allowed
+
+
+async def require_capability(db, actor_id: int, capability: str, context_id: int,
+                            *, doanything: bool = True) -> None:
+    """Authorize a mutation: the ONE mechanism every write path uses. Returns
+    normally if the actor may act, raises PermissionError otherwise (the routers
+    map that to HTTP 403, naming the missing capability). A site admin (config
+    list) bypasses — checked here so an unseeded capability like role:manage
+    still lets an admin through while denying everyone else (fail-closed)."""
+    db = _resolve_db(db)
+    ident = await _account_and_identity(db, actor_id)
+    # Account state is checked BEFORE the admin bypass — a deleted/suspended
+    # account (even a site admin's) cannot log in, so it cannot mutate either.
+    if ident["deleted"] or ident["suspended"]:
+        raise PermissionError(f"actor {actor_id} account is not active (deleted or suspended)")
+    if ident["is_admin"] and doanything:
+        return
+    if not await has_capability(db, actor_id, capability, context_id, doanything=doanything):
+        raise PermissionError(
+            f"actor {actor_id} lacks capability '{capability}' at context {context_id}"
+        )
 
 
 async def check(db, actor_id: int, capability: str, context_id: int, *,
@@ -756,6 +802,12 @@ async def assign_role(db, user_id: int, role_id: int, context_id: int, *, actor_
     write path share one source of truth, so the matrix can't be bypassed.
     """
     db = _resolve_db(db)
+    ident = await _account_and_identity(db, actor_id)
+    # Account state first: a deleted/suspended actor (even admin) cannot assign,
+    # and assign_role does not route through require_capability (it uses the
+    # assignable matrix), so the check must live here too.
+    if ident["deleted"] or ident["suspended"]:
+        raise PermissionError(f"actor {actor_id} account is not active (deleted or suspended)")
     target = await db.fetch_one("select short_name from role where id=$1", role_id)
     if target is None:
         raise ValueError("role not found")
@@ -778,32 +830,96 @@ async def assign_role(db, user_id: int, role_id: int, context_id: int, *, actor_
     )
     if row is None:
         return {"created": False, "reason": "assignment already exists (manual)"}
+    await _audit(db, "role.assigned", actor_id=actor_id, affected_id=user_id,
+                 context_id=context_id,
+                 detail={"role_id": role_id, "role": target["short_name"],
+                         "assignment_id": row["id"]})
     return {"created": True, "assignment": dict(row)}
 
 
-async def set_override(db, role_id: int, context_id: int, capability: str,
-                       permission: Optional[str]) -> dict:
-    """Set/replace/clear a role_capability row. permission=None DELETES the row
-    (back to 'not set'/inherit) — never leaves a 'deny' behind."""
+async def unassign_role(db, assignment_id: int, *, actor_id: int) -> dict:
+    """Remove a MANUAL role assignment. Enforces authorization SERVER-SIDE: the
+    actor must hold role:assign at the assignment's context. enrol_%-owned rows
+    belong to enrolment sync and are refused (PermissionError → 403), never
+    deleted here. Raises ValueError if the assignment does not exist (→ 404)."""
     db = _resolve_db(db)
+    row = await db.fetch_one(
+        "select id, user_id, role_id, context_id, component from role_assignment where id=$1",
+        assignment_id,
+    )
+    if row is None:
+        raise ValueError("assignment not found")
+    if row["component"]:  # non-empty component => created by an enrol_% sync
+        raise PermissionError(
+            f"assignment {assignment_id} was created by '{row['component']}' "
+            "(an enrolment sync) — remove it via enrolment, not the roles UI"
+        )
+    await require_capability(db, actor_id, CAP_ROLE_ASSIGN, row["context_id"])
+    await db.fetch_one("delete from role_assignment where id=$1 returning id", assignment_id)
+    await _audit(db, "role.unassigned", actor_id=actor_id, affected_id=row["user_id"],
+                 context_id=row["context_id"],
+                 detail={"role_id": row["role_id"], "assignment_id": assignment_id})
+    return {"deleted": True, "assignment_id": assignment_id}
+
+
+async def create_role(db, short_name: str, name: str, description: str,
+                      archetype: Optional[str], *, actor_id: int) -> dict:
+    """Create a new role DEFINITION. Requires role:manage at system context
+    (admin bypasses; see CAP_ROLE_MANAGE). sort_order is computed inside the
+    INSERT to avoid a read/insert race on the unique(sort_order) constraint."""
+    db = _resolve_db(db)
+    sys = await db.fetch_one("select id from context where level='system'")
+    sys_ctx = sys["id"] if sys else 0
+    await require_capability(db, actor_id, CAP_ROLE_MANAGE, sys_ctx)
+    row = await db.fetch_one(
+        "insert into role (short_name, name, description, archetype, sort_order) "
+        "values ($1,$2,$3,$4,(select coalesce(max(sort_order),0)+1 from role)) "
+        "returning id, short_name, name, description, archetype, sort_order",
+        short_name, name, description, archetype,
+    )
+    await _audit(db, "role.created", actor_id=actor_id, context_id=sys_ctx,
+                 detail={"role_id": row["id"], "short_name": short_name})
+    return row
+
+
+async def set_override(db, role_id: int, context_id: int, capability: str,
+                       permission: Optional[str], *, actor_id: int) -> dict:
+    """Set/replace/clear a role_capability row. permission=None DELETES the row
+    (back to 'not set'/inherit) — never leaves a 'deny' behind.
+
+    Authorized SERVER-SIDE: the actor must hold role:override at this context
+    (admin bypasses), else PermissionError → 403. An unknown capability name is
+    a ValueError → 400 (validation), never an uncaught FK-violation 500.
+    """
+    db = _resolve_db(db)
+    await require_capability(db, actor_id, CAP_ROLE_OVERRIDE, context_id)
+    # Validate the capability exists in the catalogue BEFORE writing — otherwise
+    # the FK on role_capability.capability raises deep in the driver (a 500).
+    if await _load_capability(db, capability) is None:
+        raise ValueError(f"unknown capability '{capability}' — not in the catalogue")
     if permission is None:
         row = await db.fetch_one(
             "delete from role_capability where role_id=$1 and context_id=$2 and capability=$3 "
             "returning id",
             role_id, context_id, capability,
         )
+        await _audit(db, "role.override_cleared", actor_id=actor_id, context_id=context_id,
+                     detail={"role_id": role_id, "capability": capability})
         return {"action": "cleared", "was_present": row is not None,
                 "note": "row removed — capability is now 'not set' (inherit)"}
     if permission not in (ALLOW, PREVENT, PROHIBIT):
         raise ValueError(f"invalid permission '{permission}'")
     row = await db.fetch_one(
-        "insert into role_capability (role_id, context_id, capability, permission) "
-        "values ($1,$2,$3,$4::cap_permission) "
+        "insert into role_capability (role_id, context_id, capability, permission, modified_by) "
+        "values ($1,$2,$3,$4::cap_permission,$5) "
         "on conflict (role_id, context_id, capability) "
-        "do update set permission=excluded.permission, updated_at=now() "
+        "do update set permission=excluded.permission, modified_by=excluded.modified_by, "
+        "updated_at=now() "
         "returning id, role_id, context_id, capability, permission",
-        role_id, context_id, capability, permission,
+        role_id, context_id, capability, permission, actor_id,
     )
+    await _audit(db, "role.overridden", actor_id=actor_id, context_id=context_id,
+                 detail={"role_id": role_id, "capability": capability, "permission": permission})
     return {"action": "set", "row": dict(row)}
 
 
@@ -889,11 +1005,16 @@ async def role_capability_sheet(db, role_id: int, context_id: int) -> list[dict]
 
 
 async def clone_role(db, source_role_id: int, short_name: str, name: str,
-                     description: str = "") -> dict:
+                     description: str = "", *, actor_id: int) -> dict:
     """Clone a role from an existing one, copying all its SYSTEM-context
     role_capability rows (its definition). Overrides at deeper contexts are not
-    copied — a fresh role starts from the archetype-style definition only."""
+    copied — a fresh role starts from the archetype-style definition only.
+
+    Requires role:manage at system context (admin bypasses; see CAP_ROLE_MANAGE),
+    else PermissionError → 403."""
     db = _resolve_db(db)
+    sys_pre = await db.fetch_one("select id from context where level='system'")
+    await require_capability(db, actor_id, CAP_ROLE_MANAGE, sys_pre["id"] if sys_pre else 0)
     src = await db.fetch_one("select archetype from role where id=$1", source_role_id)
     if src is None:
         raise ValueError("source role not found")
@@ -915,6 +1036,10 @@ async def clone_role(db, source_role_id: int, short_name: str, name: str,
             new["id"], source_role_id, sys["id"],
         )
         copied = len(res)
+    await _audit(db, "role.cloned", actor_id=actor_id,
+                 context_id=sys["id"] if sys else None,
+                 detail={"role_id": new["id"], "short_name": short_name,
+                         "cloned_from": source_role_id, "capabilities_copied": copied})
     return {"role": dict(new), "capabilities_copied": copied}
 
 
