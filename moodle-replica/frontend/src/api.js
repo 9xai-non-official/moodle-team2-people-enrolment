@@ -54,7 +54,9 @@ async function request(method, path, body) {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
-      // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields.
+      // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields;
+      // the global DB handler: {ok, code, reason, detail, constraint}.
+      // ApiError normalises all three — see errors.js.
       let payload = null;
       try {
         payload = await res.json();
