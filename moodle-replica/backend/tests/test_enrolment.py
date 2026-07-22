@@ -10,13 +10,23 @@ Run:  ./.venv/bin/pip install -r tests/requirements-dev.txt
       ./.venv/bin/python -m pytest tests/test_enrolment.py -v
 """
 import asyncio
+import os
 import pathlib
 import re
 
 import pytest
+from dotenv import dotenv_values
 
 from app import db
 from app.services import enrolment as svc
+
+# The hermetic modules (test_api_smoke, test_check_integration) pop
+# DATABASE_URL from the process env at import, so in a whole-suite run it is
+# gone by the time these tests execute. Read it from .env WITHOUT touching
+# os.environ at import (their 503-without-db test needs it absent while THEY
+# run) and re-inject lazily inside run(), which only executes with our tests.
+_ENV_URL = (dotenv_values(pathlib.Path(__file__).resolve().parents[1] / ".env")
+            .get("DATABASE_URL") or os.environ.get("DATABASE_URL"))
 
 # Scratch identities (seeded for exactly this purpose) — never seed students.
 ALICE, BOB = 4, 5           # demo_alice / demo_bob
@@ -28,6 +38,8 @@ STUDENT_ROLE = 4
 
 def run(coro):
     """Each test gets a fresh loop + pool (asyncpg pools are loop-bound)."""
+    if _ENV_URL:
+        os.environ["DATABASE_URL"] = _ENV_URL
     async def wrapped():
         await db.connect()
         try:
