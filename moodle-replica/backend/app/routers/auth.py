@@ -150,3 +150,37 @@ async def me(user_id: int):
     if not user or user["deleted"]:
         raise HTTPException(status_code=404, detail="unknown user")
     return await _me_summary(user)
+
+
+@router.patch("/profile")
+async def update_profile(body: dict):
+    """Own-account maintenance (Dashboard ⚙️ My account): rename + password
+    change. Credentialed accounts must prove the current password; demo
+    personas (no app_credential row) may set one, which creates a confirmed
+    credential."""
+    user = await db.fetch_one(
+        "select id, username, first_name, last_name, suspended, "
+        "(deleted_at is not null) as deleted from app_user where id = $1",
+        int(body.get("user_id", 0)))
+    if not user or user["deleted"]:
+        raise HTTPException(status_code=404, detail="unknown user")
+    if body.get("new_password"):
+        cred = await db.fetch_one(
+            "select password_hash from app_credential where user_id = $1", user["id"])
+        if cred is not None and not _verify(body.get("current_password") or "", cred["password_hash"]):
+            raise HTTPException(status_code=403, detail={"reasons": [
+                "current password is wrong — no password change without it"]})
+        await db.execute(
+            """
+            insert into app_credential (user_id, password_hash, confirmed)
+            values ($1, $2, true)
+            on conflict (user_id) do update set password_hash = excluded.password_hash
+            """,
+            user["id"], _hash(body["new_password"]))
+    first = (body.get("first_name") or "").strip() or user["first_name"]
+    last = (body.get("last_name") or "").strip() or user["last_name"]
+    updated = await db.fetch_one(
+        "update app_user set first_name = $2, last_name = $3 where id = $1 "
+        "returning id, username, first_name, last_name, suspended",
+        user["id"], first, last)
+    return {**dict(updated), "full_name": f"{updated['first_name']} {updated['last_name']}"}
