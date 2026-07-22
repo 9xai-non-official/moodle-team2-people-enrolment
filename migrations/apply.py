@@ -96,6 +96,20 @@ async def main() -> int:
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
+        "--baseline", default="",
+        help="comma-separated versions to RECORD as applied WITHOUT running them, "
+             "e.g. --baseline M01,M02. For adopting a database that already has "
+             "that state — the deployed Supabase DB already had schema.sql and "
+             "seed.sql applied by hand before migrations existed, so replaying "
+             "them would error on every `create type`. Only ever use this for "
+             "migrations whose effect is verifiably already present.")
+    ap.add_argument(
+        "--skip", default="",
+        help="comma-separated versions to hold back, e.g. --skip M09,M13,M15. "
+             "Held migrations are NOT recorded in schema_migrations, so --status "
+             "keeps reporting them as PENDING. Use for a staged rollout when a "
+             "migration needs its application code deployed alongside it.")
+    ap.add_argument(
         "--with-fixtures", action="store_true",
         help="also apply the demo personas from moodle-replica/backend/fixtures.sql, "
              "AFTER all migrations. Needed by test_enrolment.py and the hard-case "
@@ -120,7 +134,27 @@ async def main() -> int:
                 print(f"  [ orphan] {v} recorded but no file present")
             return 0
 
-        pending = [(v, p) for v, p in migrations if v not in done]
+        baseline = {v.strip() for v in args.baseline.split(",") if v.strip()}
+        if baseline and not args.dry_run:
+            await conn.execute(
+                "create table if not exists schema_migrations ("
+                "  version text primary key,"
+                "  applied_at timestamptz not null default now())")
+            for v in sorted(baseline - done):
+                await conn.execute(
+                    "insert into schema_migrations(version) values ($1) on conflict do nothing", v)
+                print(f"  [BASELINE] {v} — recorded as applied, NOT executed")
+            done |= baseline
+        elif baseline:
+            for v in sorted(baseline - done):
+                print(f"  [BASELINE] {v} — would be recorded as applied, not executed")
+            done |= baseline
+
+        held = {v.strip() for v in args.skip.split(",") if v.strip()}
+        pending = [(v, p) for v, p in migrations if v not in done and v not in held]
+        if held:
+            for v in sorted(held):
+                print(f"  [   HELD] {v} — skipped, stays PENDING in the ledger")
         if not pending:
             print("nothing to do — all migrations applied")
             return 0
