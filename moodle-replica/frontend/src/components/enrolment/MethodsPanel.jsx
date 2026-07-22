@@ -28,6 +28,17 @@ import GuestPreview from "./GuestPreview";
 // datetime-local wants "YYYY-MM-DDTHH:mm"; the API returns ISO-8601.
 const toLocal = (iso) => (iso ? String(iso).slice(0, 16) : "");
 
+// A window that is already set CANNOT be cleared through the API:
+// update_method builds `enrol_start = coalesce($4, enrol_start)`
+// (services/enrolment.py:597-598), so a null means "leave it alone", not
+// "unset it". PATCH still returns 200, so a cleared field looks saved and
+// silently is not. VERIFIED: set 2030-01-01, PATCH null, value unchanged.
+//
+// Rather than ship a control that lies, we detect the case and say so.
+// Fix belongs in the backend (exclude_unset, or a sentinel for "clear").
+const clearsExisting = (m, d) =>
+  (!!m.enrol_start && !d.enrol_start) || (!!m.enrol_end && !d.enrol_end);
+
 export default function MethodsPanel({ courseId }) {
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -214,6 +225,14 @@ export default function MethodsPanel({ courseId }) {
                 Save
               </button>
             </div>
+            {draft[m.id] && clearsExisting(m, editing(m)) && (
+              <div className="banner-info">
+                Clearing a date that is already set will not take effect — the
+                API treats an empty value as “leave unchanged”, so the save
+                will report success and the window will stay as it is. Other
+                edits in this row still save normally.
+              </div>
+            )}
             <div className="muted">
               The window feeds the <code>window_open</code> gate
               {m.method === "self" && (
