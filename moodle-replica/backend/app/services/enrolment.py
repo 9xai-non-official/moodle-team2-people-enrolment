@@ -656,8 +656,14 @@ async def delete_method(db, method_id: int, *,
         users = await _all(
             conn, "select user_id from enrolment where method_id = $1", method_id)
         for u in users:
+            # Tearing down the whole instance is a legitimate system removal,
+            # exactly like cohort sync — so bypass the R-COHORT active-unenrol
+            # guard (_cohort_sync=True). Without this, deleting a cohort method
+            # with active members would leave every unenrol refused while the
+            # ON DELETE CASCADE still removed the enrolment rows — orphaning
+            # their role_assignment and group memberships (ghost access).
             await unenrol_user(conn, method_id, u["user_id"], actor_id=actor_id,
-                               _group_ops=ops)
+                               _cohort_sync=True, _group_ops=ops)
         await _all(conn,
                    "delete from enrolment_method where id = $1 returning id",
                    method_id)

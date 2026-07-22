@@ -369,6 +369,91 @@ def test_cohort_active_unenrol_blocked():
     run(scenario())
 
 
+def test_delete_cohort_method_with_active_members():
+    """Regression (C2 R-COHORT vs delete_method): tearing down a cohort method
+    that has ACTIVE members must fully clean up — the guard bypass in
+    delete_method means enrolment rows, provenance role rows AND group
+    memberships all go, leaving no ghost course access. Without the bypass the
+    ON DELETE CASCADE removed the enrolment rows while every unenrol was
+    refused, orphaning the role_assignment rows."""
+    async def scenario():
+        c = await svc.create_cohort(db, "scratch-delcohort", "SCRATCH-DC")
+        cid = c["cohort"]["id"]
+        mid = None
+        try:
+            mid = (await svc.create_method(
+                db, LAB1, "cohort", cohort_id=cid,
+                default_role_id=STUDENT_ROLE))["method"]["id"]
+            await db.fetch_all(
+                "insert into cohort_member (cohort_id, user_id) values ($1,$2) "
+                "returning user_id", cid, ALICE)
+            await svc.sync_cohort_method(db, mid, actor_id=ADMIN)
+            assert await svc.is_active_enrolled(db, ALICE, LAB1)
+            # provenance role row exists before teardown
+            assert await db.fetch_one(
+                "select 1 from role_assignment where user_id=$1 "
+                "and component='enrol_cohort' and item_id=$2", ALICE, mid)
+
+            res = await svc.delete_method(db, mid, actor_id=ADMIN)
+            assert res["ok"] and ALICE in res["unenrolled"]
+            mid_deleted, mid = mid, None
+            # no ghost: enrolment gone, role_assignment gone, method gone
+            assert not await svc.is_enrolled(db, ALICE, LAB1)
+            assert await db.fetch_all(
+                "select 1 from role_assignment where user_id=$1 "
+                "and component='enrol_cohort' and item_id=$2",
+                ALICE, mid_deleted) == [], "ghost cohort role left behind"
+        finally:
+            await _cleanup_scratch(method_ids=[mid] if mid else [],
+                                   cohort_ids=[cid])
+    run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# T2-ENR-005 — per-path unenrol keeps a DIFFERENT role justified by another path
+# ---------------------------------------------------------------------------
+
+def test_perpath_unenrol_keeps_role_from_other_path():
+    """manual-teacher + cohort-student on one course. Unenrol the manual path →
+    the teacher role (its provenance) is removed, but the cohort-granted
+    student role and enrolment survive (§16 R-ROLE / T2-ENR-005)."""
+    async def scenario():
+        teacher_role = (await db.fetch_one(
+            "select id from role where short_name = 'editingteacher'"))["id"]
+        c = await svc.create_cohort(db, "scratch-perpath", "SCRATCH-PP")
+        cid = c["cohort"]["id"]
+        m_manual = m_cohort = None
+        try:
+            m_manual = await _make_method(default_role_id=teacher_role)
+            m_cohort = (await svc.create_method(
+                db, LAB1, "cohort", cohort_id=cid,
+                default_role_id=STUDENT_ROLE))["method"]["id"]
+            await db.fetch_all(
+                "insert into cohort_member (cohort_id, user_id) values ($1,$2) "
+                "returning user_id", cid, ALICE)
+            await svc.sync_cohort_method(db, m_cohort, actor_id=ADMIN)
+            await svc.enrol_user(db, m_manual, ALICE, role_id=teacher_role,
+                                 actor_id=ADMIN)
+
+            # unenrol ONLY the manual path
+            res = await svc.unenrol_user(db, m_manual, ALICE, actor_id=ADMIN)
+            assert res["ok"] and not res["last_path_cleanup"]
+            rows = {(r["component"], r["role_id"]) for r in await db.fetch_all(
+                "select component, role_id from role_assignment where user_id=$1",
+                ALICE)}
+            assert ("enrol_manual", teacher_role) not in rows, \
+                "manual teacher provenance should be gone"
+            assert ("enrol_cohort", STUDENT_ROLE) in rows, \
+                "cohort student role must survive the manual unenrol"
+            assert await svc.is_active_enrolled(db, ALICE, LAB1), \
+                "still enrolled via the cohort path"
+        finally:
+            await _cleanup_scratch(
+                method_ids=[x for x in (m_manual, m_cohort) if x],
+                cohort_ids=[cid])
+    run(scenario())
+
+
 # ---------------------------------------------------------------------------
 # §6.7 — guest: no enrolment rows ever; one instance per course (code-enforced)
 # ---------------------------------------------------------------------------
