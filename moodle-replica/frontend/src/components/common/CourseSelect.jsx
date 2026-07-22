@@ -1,6 +1,6 @@
 // Course dropdown fed by /api/courses. value = course id (number) or "".
 import { useEffect, useState } from "react";
-import { apiGet } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 
 export default function CourseSelect({
   value,
@@ -12,7 +12,7 @@ export default function CourseSelect({
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    apiGet(`/api/courses${includeDeleted ? "?include_deleted=1" : ""}`)
+    cachedGet(`/api/courses${includeDeleted ? "?include_deleted=1" : ""}`)
       .then((list) => {
         setCourses(list);
         if (autoSelectFirst && list.length && !value) onChange(list[0].id);
@@ -25,6 +25,7 @@ export default function CourseSelect({
   return (
     <select
       className="select"
+      aria-label="Course"
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
     >

@@ -266,6 +266,7 @@ function runCheck(body) {
     reasons,
     gates,
     capability_values: g3.capability_values,
+    inputs: { ...body }, // original request — lets the UI replay the check
   };
   DECISIONS.unshift(decision); // newest first
   return decision;
@@ -273,6 +274,42 @@ function runCheck(body) {
 
 export const routes = [
   { method: "GET", pattern: /^\/api\/roles$/, handler: () => ROLES },
+  {
+    method: "POST",
+    pattern: /^\/api\/roles$/,
+    handler: (m, body) => {
+      const short = (body.short_name ?? "").trim();
+      const name = (body.name ?? "").trim();
+      if (!short || !name)
+        throw new ApiError(400, { detail: "short_name and name are required" });
+      if (ROLES.some((r) => r.short_name === short))
+        throw new ApiError(409, {
+          detail: "role short_name already exists",
+          reasons: [
+            `role short_name '${short}' already exists — short names are the unique key; pick another`,
+          ],
+        });
+      const nextId = Math.max(0, ...ROLES.map((r) => r.id)) + 1;
+      const role = {
+        id: nextId,
+        sort_order: nextId,
+        short_name: short,
+        name,
+        archetype: body.archetype ?? null,
+      };
+      ROLES.push(role);
+      // Moodle's "duplicate role" copies the source role's WHOLE definition:
+      // its system-context defaults AND every context override (including
+      // CS101's accessallgroups=prevent). Copy-everything is the whole point —
+      // you get a faithful clone, then override the COPY, never the original.
+      // This is exactly how ta.allgroups exists: a scoped duplicate of 'teacher'.
+      if (body.duplicate_of != null)
+        ROLE_CAPABILITIES.filter((r) => r.role_id === body.duplicate_of).forEach((r) =>
+          ROLE_CAPABILITIES.push({ ...r, role_id: nextId }),
+        );
+      return role;
+    },
+  },
   { method: "GET", pattern: /^\/api\/roles\/contexts$/, handler: () => CONTEXTS },
   { method: "GET", pattern: /^\/api\/roles\/capabilities$/, handler: () => CAPABILITIES },
   {
@@ -354,6 +391,25 @@ export const routes = [
       };
       ROLE_ASSIGNMENTS.push(row);
       return assignmentRow(row);
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/roles\/assignments\/(\d+)$/,
+    handler: (m) => {
+      const idx = ROLE_ASSIGNMENTS.findIndex((a) => a.id === Number(m[1]));
+      if (idx < 0) throw new ApiError(404, { detail: "assignment not found" });
+      // Provenance guard: enrol_* rows are machine-created by an enrolment
+      // method's sync. Deleting one here is futile — the next sync recreates it.
+      const { component } = ROLE_ASSIGNMENTS[idx];
+      if (component.startsWith("enrol_"))
+        throw new ApiError(403, {
+          reasons: [
+            `assignment is owned by '${component}' (auto-created by an enrolment method) — remove the enrolment path instead; deleting it here would be recreated on next sync`,
+          ],
+        });
+      ROLE_ASSIGNMENTS.splice(idx, 1);
+      return null; // 204
     },
   },
   { method: "POST", pattern: /^\/api\/permissions\/check$/, handler: (m, body) => runCheck(body) },

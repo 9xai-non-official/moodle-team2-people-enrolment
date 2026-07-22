@@ -17,3 +17,4 @@ build/
 TEAM_CREDENTIALS.md
 secrets.*
 *.key
+.vercel/

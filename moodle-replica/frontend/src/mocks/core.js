@@ -1,12 +1,15 @@
-// Core mocks: users + courses lists (acting-user select, course selects,
-// dashboard counts). Owned by the shell, not a domain.
+// Core mocks: users + courses + stats. Restored after a real-mode regression:
+// domain mocks resolve ids against seed.js, so mock mode must serve the seed's
+// users/courses too — half-real half-mock ids diverge (real DEMO-CS101 id 2 is
+// seed MATH200). Delete this file only when ALL domain endpoints are real.
+// Real mode (VITE_USE_MOCKS=0) never touches this file.
 import { USERS, COURSES, ENROLMENTS, GROUPS } from "./seed";
 
 export const routes = [
   {
     method: "GET",
     pattern: /^\/api\/users$/,
-    handler: () => USERS.filter((u) => u.username !== "student.gone"), // ghada exists only in snapshots
+    handler: () => USERS.filter((u) => u.username !== "student.gone"),
   },
   {
     method: "GET",

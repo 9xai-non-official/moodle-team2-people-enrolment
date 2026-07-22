@@ -67,6 +67,44 @@ export const routes = [
   },
   {
     method: "POST",
+    pattern: /^\/api\/groups\/courses\/(\d+)\/groups$/,
+    handler: (m, body) => {
+      const id = Math.max(0, ...GROUPS.map((g) => g.id)) + 1;
+      const group = {
+        id,
+        course_id: Number(m[1]),
+        name: body.name,
+        enrolment_key: body.enrolment_key || null,
+        participation: true,
+      };
+      GROUPS.push(group);
+      return {
+        id,
+        name: group.name,
+        enrolment_key: !!group.enrolment_key,
+        participation: true,
+        members: [],
+      };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/groups\/(\d+)$/,
+    handler: (m) => {
+      const groupId = Number(m[1]);
+      const idx = GROUPS.findIndex((g) => g.id === groupId);
+      if (idx < 0) throw new ApiError(404, { detail: "group not found" });
+      GROUPS.splice(idx, 1);
+      // GRP-001: drop the group and its memberships only — never ENROLMENTS.
+      for (let i = GROUP_MEMBERS.length - 1; i >= 0; i--) {
+        if (GROUP_MEMBERS[i].group_id === groupId) GROUP_MEMBERS.splice(i, 1);
+      }
+      for (const gr of GROUPINGS) gr.group_ids = gr.group_ids.filter((gid) => gid !== groupId);
+      return null; // 204
+    },
+  },
+  {
+    method: "POST",
     pattern: /^\/api\/groups\/(\d+)\/members$/,
     handler: (m, body) => {
       const groupId = Number(m[1]);
@@ -82,32 +120,32 @@ export const routes = [
           ],
         });
       }
+      // GRP-036 / R-DUP-ADD: duplicate-add is a SILENT no-op (Moodle parity),
+      // not a 409 — the backend does on-conflict-do-nothing. (mock retired to
+      // match real behaviour — T2-GRP-003 §7 FALSE_SIMILARITY fix.)
       if (GROUP_MEMBERS.some((mm) => mm.group_id === groupId && mm.user_id === userId)) {
-        throw new ApiError(409, { reasons: [`already a member of ${group.name}`] });
+        return { ok: true, group_id: groupId, user_id: userId, component: "" };
       }
-      const row = { group_id: groupId, user_id: userId, component: "", item_id: 0 };
-      GROUP_MEMBERS.push(row);
-      return row;
+      // V3: provenance is server-set; the client body carries only {user_id}.
+      GROUP_MEMBERS.push({ group_id: groupId, user_id: userId, component: "", item_id: 0 });
+      return { ok: true, group_id: groupId, user_id: userId, component: "" };
     },
   },
   {
     method: "DELETE",
     pattern: /^\/api\/groups\/(\d+)\/members\/(\d+)$/,
-    handler: (m, body, query) => {
+    handler: (m) => {
       const groupId = Number(m[1]);
       const userId = Number(m[2]);
       const idx = GROUP_MEMBERS.findIndex(
         (mm) => mm.group_id === groupId && mm.user_id === userId,
       );
-      if (idx < 0) throw new ApiError(404, { detail: "not a member of this group" });
-      const row = GROUP_MEMBERS[idx];
-      // machine-owned rows come back on the next enrolment sync — refuse unless forced.
-      if (row.component !== "" && query.force !== "1") {
-        const reason = `membership owned by '${row.component}' (sync) — removing it by hand will be recreated on next sync`;
-        throw new ApiError(409, { reason, machine_owned: true, reasons: [reason] });
-      }
+      // T2-GRP-003 default-allow: a manager removes a manual OR component-owned
+      // row; non-member remove is idempotent success (no machine_owned/409).
+      if (idx < 0) return { ok: true, idempotent: true };
+      const removed = GROUP_MEMBERS[idx].component || null;
       GROUP_MEMBERS.splice(idx, 1);
-      return null; // 204
+      return { ok: true, removed_component: removed };
     },
   },
   {
@@ -142,6 +180,27 @@ export const routes = [
           grouping: grouping ? { id: grouping.id, name: grouping.name } : null,
         };
       });
+    },
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/groups\/activities\/(\d+)$/,
+    handler: (m, body) => {
+      const activity = ACTIVITIES.find((a) => a.id === Number(m[1]));
+      if (!activity) throw new ApiError(404, { detail: "activity not found" });
+      const course = courseById(activity.course_id);
+      // null is meaningful (inherit / no grouping); an absent key is left as-is.
+      if ("group_mode" in body) activity.group_mode = body.group_mode;
+      if ("grouping_id" in body) activity.grouping_id = body.grouping_id;
+      const grouping = activity.grouping_id
+        ? GROUPINGS.find((g) => g.id === activity.grouping_id)
+        : null;
+      return {
+        configured_mode: activity.group_mode,
+        effective_mode: effectiveMode(activity, course),
+        course_mode_forced: course.force_group_mode,
+        grouping: grouping ? { id: grouping.id, name: grouping.name } : null,
+      };
     },
   },
   {

@@ -12,7 +12,8 @@ export default function DataTable({
   onRowClick,
 }) {
   return (
-    <table className="data-table">
+    <div className="table-scroll">
+      <table className="data-table">
       <thead>
         <tr>
           {columns.map((c) => (
@@ -21,13 +22,16 @@ export default function DataTable({
         </tr>
       </thead>
       <tbody>
-        {loading && (
-          <tr>
-            <td className="data-table__state" colSpan={columns.length}>
-              Loading…
-            </td>
-          </tr>
-        )}
+        {loading &&
+          [0, 1, 2].map((i) => (
+            <tr key={`sk${i}`} aria-hidden="true">
+              {columns.map((c) => (
+                <td key={c.key}>
+                  <span className="skeleton" />
+                </td>
+              ))}
+            </tr>
+          ))}
         {!loading && error && (
           <tr>
             <td
@@ -66,6 +70,7 @@ export default function DataTable({
             </tr>
           ))}
       </tbody>
-    </table>
+      </table>
+    </div>
   );
 }

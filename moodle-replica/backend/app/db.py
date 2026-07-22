@@ -9,7 +9,9 @@ Use the session pooler (port 5432). The transaction pooler (6543) breaks
 asyncpg's prepared statements; statement_cache_size=0 is set anyway so
 either port works.
 """
+import json
 import os
+from contextlib import asynccontextmanager
 
 import asyncpg
 from dotenv import load_dotenv
@@ -62,3 +64,64 @@ async def fetch_one(query: str, *args) -> dict | None:
     async with pool().acquire() as conn:
         row = await conn.fetchrow(query, *args)
     return dict(row) if row else None
+
+
+async def fetch_val(query: str, *args):
+    async with pool().acquire() as conn:
+        return await conn.fetchval(query, *args)
+
+
+async def execute(query: str, *args) -> str:
+    async with pool().acquire() as conn:
+        return await conn.execute(query, *args)
+
+
+@asynccontextmanager
+async def transaction():
+    """Run several statements atomically.
+
+    The PostgREST layer this replaced had no transactions at all: a multi-step
+    write could half-apply. Anything that writes more than one row should use
+    this.
+
+        async with db.transaction() as conn:
+            await conn.execute(...)
+            await conn.execute(...)
+    """
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            yield conn
+
+
+async def audit(
+    event: str,
+    *,
+    actor_id: int | None = None,
+    affected_id: int | None = None,
+    course_id: int | None = None,
+    context_id: int | None = None,
+    detail: dict | None = None,
+    conn=None,
+) -> None:
+    """Append one row to audit_log (M10 / D-AUDIT).
+
+    Shared so every domain writes the same shape — the table is currently
+    written by zero code, and the fastest way to get four inconsistent shapes
+    is four separate inserts.
+
+    Pass `conn` from inside a transaction so the audit row commits or rolls
+    back with the change it describes; omit it for a standalone write.
+
+    audit_log deliberately has no foreign keys (schema.sql:389), so rows
+    outlive hard deletes of whatever they reference. Never add FKs here.
+    """
+    sql = (
+        "insert into audit_log (event, actor_id, affected_id, course_id, context_id, detail) "
+        "values ($1, $2, $3, $4, $5, $6::jsonb)"
+    )
+    args = (event, actor_id, affected_id, course_id, context_id,
+            json.dumps(detail or {}))
+    if conn is not None:
+        await conn.execute(sql, *args)
+    else:
+        await execute(sql, *args)

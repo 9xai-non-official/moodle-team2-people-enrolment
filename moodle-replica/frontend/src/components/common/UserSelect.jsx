@@ -1,13 +1,18 @@
 // User dropdown fed by /api/users. value = user id (number) or "".
 import { useEffect, useState } from "react";
-import { apiGet } from "../../api";
+import { cachedGet } from "../../lib/catalog";
 
-export default function UserSelect({ value, onChange, placeholder = "— user —" }) {
+export default function UserSelect({
+  value,
+  onChange,
+  placeholder = "— user —",
+  ariaLabel = "User",
+}) {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    apiGet("/api/users")
+    cachedGet("/api/users")
       .then(setUsers)
       .catch((e) => setError(e.message));
   }, []);
@@ -16,6 +21,7 @@ export default function UserSelect({ value, onChange, placeholder = "— user �
   return (
     <select
       className="select"
+      aria-label={ariaLabel}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
     >
