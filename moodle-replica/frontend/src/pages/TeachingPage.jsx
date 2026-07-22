@@ -4,7 +4,7 @@
 // (group-scoped, hard case 3), and the course-creation truth: teachers
 // REQUEST courses, managers create them (moodle/course:create).
 import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../api";
+import { apiGet, apiPost, apiPatch, apiDelete } from "../api";
 import { useActingUser } from "../context/ActingUser";
 import { useSelectedCourse } from "../context/SelectedCourse";
 import { useSession } from "../context/Session";
@@ -23,8 +23,12 @@ function RosterTab({ course, actorId }) {
   const [rows, setRows] = useState([]);
   const [requests, setRequests] = useState([]);
   const [contexts, setContexts] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [error, setError] = useState(null);
   const [assigning, setAssigning] = useState(null); // user being promoted
+  const [enrolOpen, setEnrolOpen] = useState(false);
+  const [enrolUserId, setEnrolUserId] = useState("");
+  const [enrolRoleId, setEnrolRoleId] = useState(4);
 
   function load() {
     setError(null);
@@ -33,15 +37,62 @@ function RosterTab({ course, actorId }) {
       .then(setRequests)
       .catch(() => setRequests([]));
     apiGet("/api/roles/contexts").then(setContexts).catch(() => {});
+    apiGet("/api/users").then(setAllUsers).catch(() => {});
   }
   useEffect(load, [course.id, actorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const courseCtx = contexts.find((c) => c.level === "course" && c.instance_id === course.id);
+  const enrolledIds = new Set(rows.map((r) => r.user_id));
+  const enrollable = allUsers.filter((u) => !enrolledIds.has(u.id));
 
   async function decide(req, verb) {
     setError(null);
     try {
       await apiPost(`/api/lms/enrol-requests/${req.id}/${verb}`, { actor_id: actorId });
+      load();
+    } catch (e) {
+      setError(e);
+    }
+  }
+
+  async function enrolUser() {
+    setError(null);
+    try {
+      await apiPost(`/api/lms/courses/${course.id}/enrol`, {
+        actor_id: actorId,
+        user_id: Number(enrolUserId),
+        role_id: Number(enrolRoleId),
+      });
+      setEnrolOpen(false);
+      setEnrolUserId("");
+      load();
+    } catch (e) {
+      setError(e);
+    }
+  }
+
+  async function pathAction(p, action) {
+    setError(null);
+    try {
+      if (action === "unenrol") {
+        await apiDelete(`/api/lms/enrolments/${p.enrolment_id}?actor_id=${actorId}`);
+      } else {
+        await apiPatch(`/api/lms/enrolments/${p.enrolment_id}`, { actor_id: actorId, status: action });
+      }
+      load();
+    } catch (e) {
+      setError(e);
+    }
+  }
+
+  async function demote(userId) {
+    setError(null);
+    try {
+      await apiPost(`/api/lms/courses/${course.id}/remove-role`, {
+        actor_id: actorId,
+        user_id: userId,
+        role_id: 3,
+      });
       load();
     } catch (e) {
       setError(e);
@@ -88,7 +139,39 @@ function RosterTab({ course, actorId }) {
         </div>
       )}
 
-      <h3>Participants</h3>
+      <div className="form-row">
+        <h3 style={{ margin: 0 }}>Participants</h3>
+        <span style={{ flex: 1 }} />
+        <button className="btn btn--primary" onClick={() => setEnrolOpen((v) => !v)}>
+          + Enrol user
+        </button>
+      </div>
+      {enrolOpen && (
+        <div className="panel panel--attention">
+          <div className="panel__title">Enrol a user into {course.short_name}</div>
+          <div className="form-row">
+            <select className="select" value={enrolUserId} onChange={(e) => setEnrolUserId(e.target.value)}>
+              <option value="">— pick a user —</option>
+              {enrollable.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name} ({u.username})
+                </option>
+              ))}
+            </select>
+            <select className="select" value={enrolRoleId} onChange={(e) => setEnrolRoleId(e.target.value)}>
+              <option value={4}>as student</option>
+              <option value={3}>as non-editing teacher</option>
+            </select>
+            <button className="btn btn--primary" disabled={!enrolUserId} onClick={enrolUser}>
+              Enrol
+            </button>
+          </div>
+          <p className="muted">
+            Manual enrolment (enrol/manual:enrol) — an editing-teacher power; a
+            teacher may only grant roles below their own.
+          </p>
+        </div>
+      )}
       <div className="table-scroll">
       <table className="data-table">
         <thead>
@@ -112,15 +195,57 @@ function RosterTab({ course, actorId }) {
               </td>
               <td>{p.groups.map((g) => g.name).join(", ") || <span className="muted">—</span>}</td>
               <td>
-                {!p.roles.includes("teacher") && !p.roles.includes("editingteacher") && (
-                  <button
-                    className="btn"
-                    title="Make this person a non-editing teacher here — they can grade, never edit (Moodle's grade-only role)"
-                    onClick={() => setAssigning(p)}
-                  >
-                    → non-editing teacher
-                  </button>
-                )}
+                <div className="cell-actions">
+                  {!p.roles.includes("teacher") && !p.roles.includes("editingteacher") && (
+                    <button
+                      className="btn btn--sm"
+                      title="Make this person a non-editing teacher here — they can grade, never edit (Moodle's grade-only role)"
+                      onClick={() => setAssigning(p)}
+                    >
+                      → non-editing teacher
+                    </button>
+                  )}
+                  {p.roles.includes("teacher") && (
+                    <button
+                      className="btn btn--sm"
+                      title="Remove the non-editing teacher role (their enrolment stays)"
+                      onClick={() => demote(p.user_id)}
+                    >
+                      remove TA role
+                    </button>
+                  )}
+                  {p.paths
+                    .filter((path) => path.method !== "cohort")
+                    .slice(0, 1)
+                    .map((path) => (
+                      <span key={path.enrolment_id}>
+                        {path.status === "active" ? (
+                          <button
+                            className="btn btn--sm"
+                            title="Suspend: blocks access, keeps every scrap of data — the reversible lever"
+                            onClick={() => pathAction(path, "suspended")}
+                          >
+                            suspend
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn--sm"
+                            title="Reactivate this enrolment path"
+                            onClick={() => pathAction(path, "active")}
+                          >
+                            reactivate
+                          </button>
+                        )}
+                        <button
+                          className="btn btn--sm btn--danger"
+                          title="Unenrol this path — completions survive, but course access ends (cohort paths refuse: sync recreates them)"
+                          onClick={() => pathAction(path, "unenrol")}
+                        >
+                          unenrol
+                        </button>
+                      </span>
+                    ))}
+                </div>
               </td>
             </tr>
           ))}
@@ -210,6 +335,25 @@ function ContentTab({ course, actorId, session }) {
             {a.activity_type === "quiz" ? "🧪" : a.activity_type === "assign" ? "📄" : "▫️"} {a.name}
           </span>
           {!a.visible && <Badge variant="grey">hidden from students</Badge>}
+          <button
+            className="btn btn--sm"
+            title={
+              a.visible
+                ? "Hide: the activity stops existing for students, instantly"
+                : "Show it to students again"
+            }
+            onClick={async () => {
+              setError(null);
+              try {
+                await apiPatch(`/api/lms/activities/${a.id}`, { actor_id: actorId, visible: !a.visible });
+                load();
+              } catch (e) {
+                setError(e);
+              }
+            }}
+          >
+            {a.visible ? "hide" : "show"}
+          </button>
         </div>
       ))}
 
@@ -440,6 +584,21 @@ function GradingTab({ course, actorId }) {
                 />
                 <button className="btn btn--primary" disabled={grades[`s${s.id}`]?.grade == null} onClick={() => gradeSub(s)}>
                   {s.status === "graded" ? "Re-grade" : "Grade"}
+                </button>
+                <button
+                  className="btn"
+                  title="Unlock it for the student — they can edit and resubmit; the grade you gave stays on record"
+                  onClick={async () => {
+                    setError(null);
+                    try {
+                      await apiPost(`/api/lms/submissions/${s.id}/revert`, { actor_id: actorId });
+                      open(activity);
+                    } catch (e) {
+                      setError(e);
+                    }
+                  }}
+                >
+                  Revert to draft
                 </button>
               </div>
             )}

@@ -84,4 +84,29 @@ const er = call("POST", "/api/lms/courses/4/enrol-request", { user_id: 6, messag
 call("POST", `/api/lms/enrol-requests/${er.id}/approve`, { actor_id: 1 });
 assert.ok(ENROLMENTS.some((e) => e.user_id === 6 && e.method_id === 46));
 
+// -- teacher roster management: manual enrol, suspend, unenrol, demote
+refuses(403, () => call("POST", "/api/lms/courses/1/enrol", { actor_id: 3, user_id: 9, role_id: 4 })); // non-editing can't enrol
+call("POST", "/api/lms/courses/1/enrol", { actor_id: 2, user_id: 9, role_id: 3 }); // Ghada in as TA
+const ghadaPath = ENROLMENTS.find((e) => e.user_id === 9);
+call("PATCH", `/api/lms/enrolments/${ghadaPath.id}`, { actor_id: 2, status: "suspended" });
+assert.equal(ghadaPath.status, "suspended");
+call("PATCH", `/api/lms/enrolments/${ghadaPath.id}`, { actor_id: 2, status: "active" });
+refuses(403, () => call("PATCH", "/api/lms/enrolments/62", { actor_id: 2, status: "suspended" })); // cohort path owned by sync
+call("POST", "/api/lms/courses/1/remove-role", { actor_id: 2, user_id: 9, role_id: 3 });
+assert.ok(!ROLE_ASSIGNMENTS.some((a) => a.user_id === 9 && a.role_id === 3), "TA role removed");
+call("DELETE", "/api/lms/enrolments/" + ghadaPath.id, null, { actor_id: "2" });
+assert.ok(!ENROLMENTS.includes(ghadaPath), "path unenrolled");
+
+// -- revert to draft unlocks, keeps the grade
+const graded = call("POST", "/api/lms/submissions/82/revert", { actor_id: 2 });
+assert.equal(graded.status, "draft");
+assert.equal(graded.grade, 86, "revert keeps the grade on record");
+
+// -- activity visibility: non-editing refused, editing toggles
+refuses(403, () => call("PATCH", "/api/lms/activities/101", { actor_id: 3, visible: false }));
+call("PATCH", "/api/lms/activities/101", { actor_id: 2, visible: false });
+const actsHidden = call("GET", "/api/lms/courses/1/activities", null, { user_id: "7" });
+assert.ok(!actsHidden.some((a) => a.id === 101), "hidden activity vanishes for students");
+call("PATCH", "/api/lms/activities/101", { actor_id: 2, visible: true });
+
 console.log(`lms self-check OK — ${USERS.length} users, ${ENROLMENTS.length} enrolments in final state`);
