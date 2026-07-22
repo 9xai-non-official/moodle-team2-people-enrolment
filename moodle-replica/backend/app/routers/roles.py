@@ -4,10 +4,15 @@ Replaces the 4-hardcoded-role stub. All resolver logic lives in
 app.services.permissions; this router is thin HTTP glue. It writes only the
 tables Khaled owns (role, role_capability, and manual role_assignment rows with
 component=''); enrol_% assignment rows are read-only here and refused with 403.
-"""
-from typing import Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query
+Identity: every MUTATING route (and /assignable, which is actor-relative) takes
+the acting principal from a VERIFIED credential (Depends(get_current_user)) — never
+from a request body/query field. Authorization is enforced server-side in the
+service layer (require_capability): a missing capability → 403 with no write.
+Pure role-definition READS (list roles, a role's capability sheet, a user's
+assignments) stay open — they are configuration, like Moodle's role list.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import db
 from app.schemas_roles import (
@@ -19,16 +24,79 @@ from app.schemas_roles import (
     SetCapability,
 )
 from app.services import permissions
+from app.services.auth import Principal, get_current_user
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
 
 
 # --- static routes first (avoid clashing with /{role_id}/...) --------------
+@router.get("/capabilities")
+async def list_capabilities():
+    """The capability catalogue (config read). Feeds the Permission Checker's
+    capability picker — CR-5, previously only served by the frontend mock."""
+    return await db.fetch_all(
+        "select name, cap_type, min_context_level, component, risks "
+        "from capability order by name"
+    )
+
+
+@router.get("/contexts")
+async def list_contexts():
+    """The context tree (config read). label = 'level:instance_id'. Feeds context
+    pickers — CR-5, previously only served by the frontend mock."""
+    rows = await db.fetch_all(
+        "select id, level, instance_id, path, depth from context order by path"
+    )
+    return [
+        {
+            "id": r["id"],
+            "level": r["level"],
+            "instance_id": r["instance_id"],
+            "path": r["path"],
+            "depth": r["depth"],
+            "label": f"{r['level']}:{r['instance_id']}",
+        }
+        for r in rows
+    ]
+
+
 @router.get("/assignable")
-async def get_assignable(context_id: int = Query(...), actor_id: int = Query(...)):
-    """The hardcoded allow-assign matrix result for this actor at this context.
+async def get_assignable(
+    context_id: int = Query(...),
+    principal: Principal = Depends(get_current_user),
+):
+    """The allow-assign matrix result for the AUTHENTICATED actor at this context.
     Demonstrates "capability necessary, matrix also required" (§9.7 ex.4)."""
-    return await permissions.assignable_roles(db, actor_id, context_id)
+    return await permissions.assignable_roles(db, principal.user_id, context_id)
+
+
+@router.get("/assignments")
+async def list_assignments(context_id: int = Query(...)):
+    """Assignments in one context (config/roster read). Feeds the Assignments
+    tab — CR-5, previously served only by the frontend mock."""
+    rows = await db.fetch_all(
+        "select ra.id, ra.component, ra.item_id, "
+        "u.id as user_id, (u.first_name || ' ' || u.last_name) as full_name, "
+        "r.id as role_id, r.short_name, "
+        "c.id as ctx_id, c.level, c.instance_id "
+        "from role_assignment ra "
+        "join app_user u on u.id = ra.user_id "
+        "join role r on r.id = ra.role_id "
+        "join context c on c.id = ra.context_id "
+        "where ra.context_id = $1 order by r.sort_order",
+        context_id,
+    )
+    return [
+        {
+            "assignment_id": r["id"],
+            "user": {"id": r["user_id"], "full_name": r["full_name"]},
+            "role": {"id": r["role_id"], "short_name": r["short_name"]},
+            "context": {"id": r["ctx_id"], "label": f"{r['level']}:{r['instance_id']}"},
+            "component": r["component"],
+            "item_id": r["item_id"],
+        }
+        for r in rows
+    ]
 
 
 @router.get("/users/{user_id}/assignments")
@@ -61,12 +129,16 @@ async def user_assignments(user_id: int):
 
 
 @router.post("/assignments")
-async def create_assignment(body: AssignRoleIn):
-    """Manually assign a role at a context (component=''). Server-side enforces
-    the role:assign capability + the allow-assign matrix — a 403 otherwise."""
+async def create_assignment(
+    body: AssignRoleIn,
+    principal: Principal = Depends(get_current_user),
+):
+    """Manually assign a role at a context (component=''). The actor is the
+    authenticated principal; the service enforces role:assign + the allow-assign
+    matrix — a 403 otherwise."""
     try:
         return await permissions.assign_role(
-            db, body.user_id, body.role_id, body.context_id, actor_id=body.actor_id
+            db, body.user_id, body.role_id, body.context_id, actor_id=principal.user_id
         )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -75,24 +147,18 @@ async def create_assignment(body: AssignRoleIn):
 
 
 @router.delete("/assignments/{assignment_id}")
-async def delete_assignment(assignment_id: int):
-    """Unassign a MANUAL role. enrol_% rows belong to enrolment flows and are
-    refused with a 403 explaining why."""
-    row = await db.fetch_one(
-        "select id, component from role_assignment where id=$1", assignment_id
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="assignment not found")
-    if row["component"]:  # non-empty component => created by an enrol_% sync
-        raise HTTPException(
-            status_code=403,
-            detail=f"assignment {assignment_id} was created by '{row['component']}' "
-            "(an enrolment sync) — remove it via enrolment, not the roles UI",
-        )
-    await db.fetch_one(
-        "delete from role_assignment where id=$1 returning id", assignment_id
-    )
-    return {"deleted": True, "assignment_id": assignment_id}
+async def delete_assignment(
+    assignment_id: int,
+    principal: Principal = Depends(get_current_user),
+):
+    """Unassign a MANUAL role. Requires role:assign at the assignment's context;
+    enrol_% rows belong to enrolment flows and are refused with a 403."""
+    try:
+        return await permissions.unassign_role(db, assignment_id, actor_id=principal.user_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # --- role CRUD -------------------------------------------------------------
@@ -105,26 +171,35 @@ async def list_roles():
 
 
 @router.post("", response_model=RoleOut, status_code=201)
-async def create_role(body: RoleCreate):
-    # sort_order computed inside the INSERT to avoid a read/insert race on the
-    # unique(sort_order) constraint under concurrent role creation.
-    row = await db.fetch_one(
-        "insert into role (short_name, name, description, archetype, sort_order) "
-        "values ($1,$2,$3,$4,(select coalesce(max(sort_order),0)+1 from role)) "
-        "returning id, short_name, name, description, archetype, sort_order",
-        body.short_name, body.name, body.description, body.archetype,
-    )
-    return row
+async def create_role(
+    body: RoleCreate,
+    principal: Principal = Depends(get_current_user),
+):
+    """Create a role definition. Requires role:manage at system (admin bypasses)."""
+    try:
+        return await permissions.create_role(
+            db, body.short_name, body.name, body.description, body.archetype,
+            actor_id=principal.user_id,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 @router.post("/{role_id}/clone", response_model=None, status_code=201)
-async def clone_role(role_id: int, body: RoleClone):
+async def clone_role(
+    role_id: int,
+    body: RoleClone,
+    principal: Principal = Depends(get_current_user),
+):
     """Clone a role, copying its system-context definition (its role_capability
-    rows). Deeper overrides are not copied."""
+    rows). Deeper overrides are not copied. Requires role:manage (admin bypasses)."""
     try:
         return await permissions.clone_role(
-            db, role_id, body.short_name, body.name, body.description
+            db, role_id, body.short_name, body.name, body.description,
+            actor_id=principal.user_id,
         )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -138,12 +213,20 @@ async def role_capabilities(role_id: int, context_id: int = Query(...)):
 
 
 @router.put("/{role_id}/capabilities")
-async def set_role_capability(role_id: int, body: SetCapability):
-    """Set/replace/clear a capability for the role at a context.
-    permission=null DELETES the row → back to 'Not set' (inherit)."""
+async def set_role_capability(
+    role_id: int,
+    body: SetCapability,
+    principal: Principal = Depends(get_current_user),
+):
+    """Set/replace/clear a capability for the role at a context. Requires
+    role:override at that context (admin bypasses). permission=null DELETES the
+    row → back to 'Not set' (inherit). An unknown capability → 400."""
     try:
         return await permissions.set_override(
-            db, role_id, body.context_id, body.capability, body.permission
+            db, role_id, body.context_id, body.capability, body.permission,
+            actor_id=principal.user_id,
         )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
