@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import db
 from app.routers import users, courses, enrolment, roles, groups, progress
+from app.routers import permissions
 
 
 @asynccontextmanager
@@ -76,3 +77,4 @@ app.include_router(enrolment.router)
 app.include_router(roles.router)
 app.include_router(groups.router)
 app.include_router(progress.router)
+app.include_router(permissions.router)
