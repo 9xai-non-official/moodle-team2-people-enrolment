@@ -153,6 +153,57 @@ def test_suspend_keeps_roles():
 
 
 # ---------------------------------------------------------------------------
+# T2-ENR-002 (ENR-010) — re-enrol preserves state; explicit activate opts in
+# ---------------------------------------------------------------------------
+
+def test_reenrol_preserves_suspension():
+    """A duplicate enrol must NOT silently reactivate a suspended row —
+    activate=True is the only way back to active. And a bare re-enrol leaves
+    the time window alone (supplied-fields-only, Moodle update_user_enrol)."""
+    async def scenario():
+        mid = await _make_method()
+        try:
+            end = (await db.fetch_one(
+                "select date_trunc('second', now() + interval '30 day') t"))["t"]
+            await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN, time_end=end)
+            await svc.suspend(db, mid, ALICE)
+
+            res = await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN)
+            assert res["ok"], res
+            assert res["enrolment"]["status"] == "suspended", \
+                "re-enrol silently reactivated a suspended row"
+            assert res["enrolment"]["time_end"] == end, \
+                "re-enrol clobbered an unsupplied time_end"
+
+            res = await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN,
+                                       activate=True)
+            assert res["enrolment"]["status"] == "active"
+            assert res["enrolment"]["time_end"] == end
+        finally:
+            await _cleanup_scratch(method_ids=[mid])
+    run(scenario())
+
+
+def test_status_flip_is_change_gated():
+    """A no-op suspend/reactivate reports changed=False and leaves updated_at
+    alone (ENR-010 change-gating)."""
+    async def scenario():
+        mid = await _make_method()
+        try:
+            await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN)
+            first = await svc.suspend(db, mid, ALICE)
+            assert first["ok"] and first["changed"] is True
+            stamp = first["enrolment"]["updated_at"]
+            again = await svc.suspend(db, mid, ALICE)
+            assert again["ok"] and again["changed"] is False
+            assert again["enrolment"]["updated_at"] == stamp, \
+                "no-op flip rewrote the row"
+        finally:
+            await _cleanup_scratch(method_ids=[mid])
+    run(scenario())
+
+
+# ---------------------------------------------------------------------------
 # §6.10 / HC-1 — two paths; removing one touches only ITS provenance;
 # removing the LAST triggers whole-course cleanup
 # ---------------------------------------------------------------------------

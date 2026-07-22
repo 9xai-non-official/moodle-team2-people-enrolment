@@ -158,7 +158,7 @@ async def enrol(method_id: int, body: EnrolRequest,
     return _ok(await svc.enrol_user(
         db, method_id, body.user_id, role_id=body.role_id,
         time_start=body.time_start, time_end=body.time_end,
-        actor_id=principal["id"]), 409)
+        actor_id=principal["id"], activate=body.activate), 409)
 
 
 @router.delete("/methods/{method_id}/enrolments/{user_id}")
@@ -197,7 +197,7 @@ async def enrol_by_course(course_id: int, body: CourseEnrolRequest,
     return _ok(await svc.enrol_user(
         db, method_id, body.user_id, role_id=body.role_id,
         time_start=body.time_start, time_end=body.time_end,
-        actor_id=principal["id"]), 409)
+        actor_id=principal["id"], activate=body.activate), 409)
 
 
 async def _resolve_row(enrolment_id: int) -> dict:
