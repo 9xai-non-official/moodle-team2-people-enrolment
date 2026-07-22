@@ -1,8 +1,11 @@
-// Permission Checker — the demo star. Feeds the four-gate pipeline and
-// renders exactly what the API returns: a verdict banner, every gate in
-// order (a passed capability gate stays green right beside a failed group
-// gate — the display never short-circuits), the per-role capability
-// resolution, and the reasons. No business rules live in this component.
+// Permission Checker — the demo star. Feeds the permission pipeline and
+// renders exactly what the API returns: a verdict banner, the supporting and
+// blocking reasons, the per-role capability resolution, the roles considered,
+// and the group scope. No business rules live in this component.
+//
+// WP04: this inspects whether a chosen SUBJECT can perform an action. It does
+// NOT change who you are signed in as — identity is carried by the session
+// token. Inspecting another user requires user:viewdetails (a 403 otherwise).
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../api";
 import { useActingUser } from "../../context/ActingUser";
@@ -10,28 +13,13 @@ import UserSelect from "../common/UserSelect";
 import Badge from "../common/Badge";
 import ReasonList from "../common/ReasonList";
 
-function GatePipeline({ gates }) {
-  return gates.map((g) => (
-    <div key={g.gate} className={`gate-row gate-row--${g.passed ? "pass" : "fail"}`}>
-      <div className="gate-row__name">{g.gate}</div>
-      <div>
-        {g.evidence.map((ev, i) => (
-          <div key={i} className="gate-row__evidence">
-            {ev}
-          </div>
-        ))}
-      </div>
-    </div>
-  ));
-}
-
 export default function PermissionChecker() {
-  const { actingUser } = useActingUser();
+  const { actingUser, signedIn } = useActingUser();
   const [capabilities, setCapabilities] = useState([]);
   const [contexts, setContexts] = useState([]);
   const [roles, setRoles] = useState([]);
-  const [actorId, setActorId] = useState(null);
-  const [actorTouched, setActorTouched] = useState(false);
+  const [subjectId, setSubjectId] = useState(null);
+  const [subjectTouched, setSubjectTouched] = useState(false);
   const [capability, setCapability] = useState(null);
   const [contextId, setContextId] = useState(null);
   const [targetUserId, setTargetUserId] = useState(null);
@@ -51,23 +39,23 @@ export default function PermissionChecker() {
         setCapabilities(caps);
         setContexts(ctxs);
         setRoles(rs);
-        if (caps.length) setCapability((cur) => cur ?? caps[0]);
+        if (caps.length) setCapability((cur) => cur ?? caps[0].name);
         if (ctxs.length) setContextId((cur) => cur ?? ctxs[0].id);
       })
       .catch((e) => setError(e.message));
   }, []);
 
-  // actor defaults to the acting user and follows it until the user picks one.
+  // Subject defaults to the signed-in user and follows it until overridden.
   useEffect(() => {
-    if (!actorTouched && actingUser) setActorId(actingUser.id);
-  }, [actingUser, actorTouched]);
+    if (!subjectTouched && actingUser) setSubjectId(actingUser.id);
+  }, [actingUser, subjectTouched]);
 
   function submit() {
     setError(null);
     setResult(null);
     setSubmitting(true);
     apiPost("/api/permissions/check", {
-      actor_id: actorId,
+      actor_user_id: subjectId,
       capability,
       context_id: contextId,
       target_user_id: targetUserId || undefined,
@@ -86,12 +74,12 @@ export default function PermissionChecker() {
       <div className="panel">
         <div className="panel__title">Check a permission</div>
         <div className="form-row">
-          <label>Actor</label>
+          <label>Subject (inspect as)</label>
           <UserSelect
-            value={actorId}
+            value={subjectId}
             onChange={(v) => {
-              setActorId(v);
-              setActorTouched(true);
+              setSubjectId(v);
+              setSubjectTouched(true);
             }}
           />
           <label>Capability</label>
@@ -101,8 +89,8 @@ export default function PermissionChecker() {
             onChange={(e) => setCapability(e.target.value)}
           >
             {capabilities.map((c) => (
-              <option key={c} value={c}>
-                {c}
+              <option key={c.name} value={c.name}>
+                {c.name}
               </option>
             ))}
           </select>
@@ -118,6 +106,11 @@ export default function PermissionChecker() {
               </option>
             ))}
           </select>
+        </div>
+        <div className="muted">
+          Signed in as {actingUser?.full_name}. This inspects whether the
+          selected subject can perform the action — it does NOT change who you
+          are signed in as. Inspecting another user requires user:viewdetails.
         </div>
         <div className="form-row">
           <label>Target user</label>
@@ -135,7 +128,7 @@ export default function PermissionChecker() {
               </option>
             ))}
           </select>
-          <label>Simulate role</label>
+          <label>Preview as role</label>
           <select
             className="select"
             value={simulateRoleId ?? ""}
@@ -151,7 +144,7 @@ export default function PermissionChecker() {
           <button
             className="btn btn--primary"
             onClick={submit}
-            disabled={!actorId || !capability || !contextId || submitting}
+            disabled={!signedIn || !subjectId || !capability || !contextId || submitting}
           >
             {submitting ? "Checking…" : "Check"}
           </button>
@@ -161,36 +154,58 @@ export default function PermissionChecker() {
 
       {result && (
         <div className="panel">
-          <div className={`verdict-banner verdict-banner--${result.verdict}`}>
-            {result.verdict.toUpperCase()}
+          <div
+            className={`verdict-banner verdict-banner--${
+              result.decision === "ALLOW" ? "allowed" : "denied"
+            }`}
+          >
+            {result.decision}
+            {result.admin_bypass && <Badge variant="blue">admin bypass</Badge>}
+            {result.simulated_role && (
+              <Badge variant="blue">previewing as {result.simulated_role}</Badge>
+            )}
           </div>
 
-          <div className="panel__title">Gate pipeline</div>
-          <GatePipeline gates={result.gates} />
+          <ReasonList reasons={result.supporting_reasons} tone="ok" title="Supporting" />
+          <ReasonList reasons={result.blocking_reasons} tone="error" title="Blocking" />
 
-          {result.capability_values.length > 0 && (
+          {Object.entries(result.capability_values || {}).length > 0 && (
             <>
               <div className="panel__title">Capability resolution</div>
-              {result.capability_values.map((v, i) => (
-                <div key={i} className="form-row">
+              {Object.entries(result.capability_values).map(([role, v]) => (
+                <div key={role} className="form-row">
                   <span>
-                    {v.role} → <strong>{v.permission}</strong>
+                    {role} → <strong>{v.value ?? "not set"}</strong>
                   </span>
-                  {v.decided_at ? (
-                    <Badge variant="blue">decided at {v.decided_at.label}</Badge>
-                  ) : (
-                    <span className="muted">not set</span>
-                  )}
+                  {v.decided_at && <Badge variant="blue">decided at {v.decided_at}</Badge>}
                 </div>
               ))}
             </>
           )}
 
-          <ReasonList
-            reasons={result.reasons}
-            tone={result.verdict === "allowed" ? "ok" : "error"}
-            title="Reasons"
-          />
+          {result.roles_considered && result.roles_considered.length > 0 && (
+            <>
+              <div className="panel__title">Roles considered</div>
+              {result.roles_considered.map((r, i) => (
+                <div key={i} className="form-row">
+                  <span>
+                    {r.role} @ {r.context}, {r.provenance}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {result.group_scope && result.group_scope.shared !== null && (
+            <>
+              <div className="panel__title">Group scope</div>
+              <div className="form-row">
+                <span>mode: {result.group_scope.mode}</span>
+                <span>shared: {String(result.group_scope.shared)}</span>
+                <span>access_all_groups: {String(result.group_scope.access_all_groups)}</span>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

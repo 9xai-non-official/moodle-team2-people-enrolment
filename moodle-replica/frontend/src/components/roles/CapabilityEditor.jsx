@@ -1,18 +1,17 @@
 // Roles tab: the capability sheet for one role at one context. Each row's
-// four-state control POSTs on change and refetches (no optimistic UI); the
-// resolved sheet — override chips, defined_at, prohibit stickiness — comes
+// four-state control PUTs on change and refetches (no optimistic UI); the
+// resolved sheet — override chips, decided_at, prohibit stickiness — comes
 // straight from the API, nothing is computed here.
 import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../../api";
+import { apiGet, apiPut } from "../../api";
 import DataTable from "../common/DataTable";
 
 const PERMISSIONS = [
-  { value: "notset", label: "Not set" },
+  { value: "", label: "Not set" },
   { value: "allow", label: "Allow" },
   { value: "prevent", label: "Prevent" },
   { value: "prohibit", label: "Prohibit" },
 ];
-const SYSTEM_CONTEXT_ID = 1;
 
 export default function CapabilityEditor() {
   const [roles, setRoles] = useState([]);
@@ -45,13 +44,21 @@ export default function CapabilityEditor() {
       .finally(() => setLoading(false));
   }, [roleId, contextId, tick]);
 
-  function setPermission(capability, permission) {
-    apiPost(`/api/roles/${roleId}/capabilities`, { context_id: contextId, capability, permission })
+  function setPermission(capability, sel) {
+    setError(null);
+    // "" clears the override — send null, never the string "notset".
+    apiPut(`/api/roles/${roleId}/capabilities`, {
+      context_id: contextId,
+      capability,
+      permission: sel === "" ? null : sel,
+    })
       .then(() => setTick((t) => t + 1)) // refetch — never trust local state
       .catch((e) => setError(e.message));
   }
 
-  const atSystem = contextId === SYSTEM_CONTEXT_ID;
+  const selectedContext = contexts.find((c) => c.id === contextId);
+  const atSystem = selectedContext?.level === "system";
+
   const columns = [
     { key: "capability", label: "Capability" },
     {
@@ -61,7 +68,7 @@ export default function CapabilityEditor() {
         <>
           <select
             className="select"
-            value={row.permission}
+            value={row.permission ?? ""}
             onChange={(e) => setPermission(row.capability, e.target.value)}
           >
             {PERMISSIONS.map((p) => (
@@ -83,11 +90,11 @@ export default function CapabilityEditor() {
         row.is_override && !atSystem ? <span className="chip">override</span> : null,
     },
     {
-      key: "defined_at",
-      label: "Defined at",
+      key: "decided_at",
+      label: "Decided at",
       render: (row) =>
-        row.defined_at ? (
-          <span className="muted">decided at {row.defined_at.label}</span>
+        row.decided_at ? (
+          <span className="muted">decided at {row.decided_at}</span>
         ) : (
           <span className="muted">—</span>
         ),
