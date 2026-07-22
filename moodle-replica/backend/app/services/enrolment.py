@@ -23,11 +23,14 @@ Cross-domain writes go through teammates' services only: group membership via
 app.services.groups (Mahmoud). Until his module lands the import is guarded and
 group side-effects are skipped with an explicit warning in the result payload.
 """
+import asyncio
 import json
 import inspect
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+
+import asyncpg
 
 from app import db as _dbmod
 
@@ -585,6 +588,89 @@ async def sync_methods_for_cohort(db, cohort_id: int, *,
 
 
 # ===========================================================================
+# Group side-effect reconciliation (task/enrol_expiry entry point)
+#
+# Why this exists: enrol_user / sync_cohort_method place cohort members into
+# their sync group AFTER the enrolment transaction commits (_run_group_ops —
+# the groups service uses its own connections and can't see our uncommitted
+# rows). A groups-service outage during that post-commit window leaves the
+# enrolment row present but the group_member row missing; a lost unenrol op
+# leaves a stale group_member row after the path is gone. This pass rebuilds
+# the DESIRED state from the enrolment tables and re-issues the SAME groups.py
+# calls the live path uses (via _run_group_ops) — it owns NO group logic of
+# its own, and it is idempotent: add_member is on-conflict-do-nothing and
+# remove_members_by_provenance is a delete, so repeated runs converge.
+#
+# Scope: only the cohort sync-group STANDING rule (member ⇒ in sync group with
+# component 'enrol_cohort') is reconstructable from state. Self-enrol group-key
+# joins are one-time key events, not derivable from standing state, so they are
+# deliberately out of scope. Suspended members KEEP their membership (§6.5:
+# groups stay on suspend), so they are neither added nor removed.
+# ===========================================================================
+
+async def reconcile_group_side_effects(db) -> dict:
+    """Repair drift between enrolment truth and cohort sync-group memberships.
+
+    Idempotent and convergent: on a clean system it finds no diff and issues
+    no ops. Safe to call on every scheduled tick from app/tasks/enrol_expiry.
+    Degrades loudly if the groups service is not merged (see _groups_call)."""
+    methods = await _all(db, """
+        select id, course_id, config from enrolment_method
+         where method = 'cohort' and status = 'enabled'
+         order by id
+    """)
+
+    ops: list = []
+    added: list = []
+    removed: list = []
+    reconciled_methods = 0
+
+    for m in methods:
+        sync_group_id = _cfg(m["config"]).get("sync_group_id")
+        if not sync_group_id:
+            continue
+        reconciled_methods += 1
+
+        # Members that SHOULD be in the sync group = the live (active) ones,
+        # exactly what add_member's enrolment guard would accept.
+        active_members = {r["user_id"] for r in await _all(db, f"""
+            select e.user_id
+              from enrolment e
+              join enrolment_method m on m.id = e.method_id
+             where e.method_id = $1 and {ACTIVE_CONDITIONS_SQL}
+        """, m["id"])}
+        # Any enrolment row via this method (any status) — a group row is
+        # legitimate as long as SOME path row still exists (suspended stays).
+        path_users = {r["user_id"] for r in await _all(db,
+            "select user_id from enrolment where method_id = $1", m["id"])}
+        # Group rows this method's provenance currently owns.
+        current = {r["user_id"] for r in await _all(db, """
+            select user_id from group_member
+             where group_id = $1 and component = 'enrol_cohort' and item_id = $2
+        """, sync_group_id, m["id"])}
+
+        for uid in sorted(active_members - current):        # missing add
+            ops.append(("add_member", (sync_group_id, uid),
+                        {"component": "enrol_cohort", "item_id": m["id"]}))
+            added.append({"method_id": m["id"], "group_id": sync_group_id,
+                          "user_id": uid})
+        for uid in sorted(current - path_users):            # stale remove
+            ops.append(("remove_members_by_provenance",
+                        (m["course_id"], uid, "enrol_cohort", m["id"]), {}))
+            removed.append({"method_id": m["id"], "course_id": m["course_id"],
+                            "user_id": uid})
+
+    results = await _run_group_ops(ops)
+    groups_available = not any(
+        isinstance(r, dict) and r.get("skipped") for r in results)
+    return {"ok": True,
+            "reconciled_methods": reconciled_methods,
+            "added": added, "removed": removed,
+            "ops": len(ops),
+            "groups_available": groups_available}
+
+
+# ===========================================================================
 # Methods (instances), guest, last access
 # ===========================================================================
 
@@ -595,29 +681,50 @@ async def create_method(db, course_id: int, method: str, *,
                         enrol_start=None, enrol_end=None,
                         config: dict | None = None) -> dict:
     """Create one method instance. Multiple instances of the same kind are
-    legal; guest is one-per-course — the deployed DB has no partial unique
-    index for it, so the rule is enforced HERE (§6.3)."""
-    async with _tx(db) as conn:
-        if method == "guest":
-            existing = await _one(conn, """
-                select 1 from enrolment_method
-                 where course_id = $1 and method = 'guest' limit 1
-            """, course_id)
-            if existing:
-                return {"ok": False,
-                        "reason": "a guest method already exists on this course "
-                                  "(one per course — code-enforced)"}
-        if method == "cohort" and cohort_id is None:
-            return {"ok": False, "reason": "cohort methods require cohort_id"}
-        row = await _one(conn, """
-            insert into enrolment_method
-                (course_id, method, status, default_role_id, cohort_id,
-                 enrol_start, enrol_end, config)
-            values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-            returning *
-        """, course_id, method, status, default_role_id, cohort_id,
-            enrol_start, enrol_end, json.dumps(config or {}))
-        return {"ok": True, "method": row}
+    legal; guest is one-per-course (§6.3).
+
+    Two layers enforce the guest rule, and they are NOT redundant:
+      1. The pre-check below turns the common (uncontended) duplicate into a
+         friendly reason without hitting the constraint.
+      2. The D-GUEST partial unique index (migration M08:
+         `unique (course_id) where method = 'guest'`) is the CORRECTNESS
+         guarantee. Under concurrency two callers can both pass the pre-check,
+         but only one INSERT survives — the loser trips the index and we
+         translate that UniqueViolationError into a typed 409 reason here,
+         which flows out through the router's _ok(..., 409) path.
+    No SELECT FOR UPDATE / advisory lock: the unique index already serialises
+    the write, so extra locking would be redundant."""
+    if method == "cohort" and cohort_id is None:
+        return {"ok": False, "reason": "cohort methods require cohort_id"}
+    try:
+        async with _tx(db) as conn:
+            if method == "guest":
+                existing = await _one(conn, """
+                    select 1 from enrolment_method
+                     where course_id = $1 and method = 'guest' limit 1
+                """, course_id)
+                if existing:
+                    return {"ok": False,
+                            "reason": "a guest method already exists on this "
+                                      "course (one per course)"}
+            row = await _one(conn, """
+                insert into enrolment_method
+                    (course_id, method, status, default_role_id, cohort_id,
+                     enrol_start, enrol_end, config)
+                values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                returning *
+            """, course_id, method, status, default_role_id, cohort_id,
+                enrol_start, enrol_end, json.dumps(config or {}))
+            return {"ok": True, "method": row}
+    except asyncpg.UniqueViolationError:
+        # Lost a concurrent guest-creation race: the D-GUEST unique index
+        # (M08) rejected the second row. The transaction has rolled back;
+        # surface it as a friendly 409 rather than a 500 (errors.py would also
+        # map it, but routing it through the service keeps the reason uniform).
+        return {"ok": False,
+                "reason": "a guest method already exists on this course "
+                          "(one per course — enforced by the D-GUEST unique "
+                          "index)"}
 
 
 async def update_method(db, method_id: int, *, status: str | None = None,
