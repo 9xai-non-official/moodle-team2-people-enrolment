@@ -1,0 +1,40 @@
+-- Dependency: D-EXPIRY-DDL  Issue: T2-ENR-004  Reviewed-by: Yaman
+-- M16 — CONDITIONAL. NOT APPLIED BY THE RUNNER.
+--
+-- ============================ DO NOT APPLY YET =============================
+-- Ships ONLY if Yaman confirms that persisted expiry STATE is needed beyond
+-- what the schema already derives. Move up into migrations/ to adopt.
+-- ===========================================================================
+--
+-- The schema can already answer "is this enrolment expired?" without storing
+-- it: enrolment.time_end (schema.sql:273) plus
+-- enrolment_method.enrol_duration (schema.sql:248), evaluated by
+-- v_enrolment_detail's liveness expression. A stored expiry column would be
+-- DERIVED DATA — it can drift from the timestamps that produce it, which is
+-- the exact failure mode we criticised Moodle's context path for.
+--
+-- So the default answer is: do not add this. Most expiry work is code (a job
+-- that flips status to 'suspended' when the window closes, and audits it).
+--
+-- The one case that justifies a column: if the team needs to distinguish
+-- "expired" from "manually suspended" as a first-class status, since both
+-- currently collapse into enrolment_status='suspended' and the audit trail is
+-- the only way to tell them apart. If so, prefer widening the enum over adding
+-- a redundant timestamp:
+--
+--   alter type enrolment_status add value if not exists 'expired';
+--
+-- and index the expiry sweep:
+--
+--   create index if not exists idx_enrolment_expiring
+--       on enrolment (time_end)
+--       where time_end is not null and status = 'active';
+--
+-- Both statements are left commented out deliberately: adopting this file
+-- means making the choice above explicitly, not running it as-is.
+--
+-- NOTE: `alter type ... add value` cannot run inside a transaction block in
+-- PostgreSQL, so if the enum route is chosen this migration must be marked
+-- non-transactional in the runner.
+
+insert into schema_migrations(version) values ('M16') on conflict do nothing;
