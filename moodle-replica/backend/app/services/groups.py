@@ -27,12 +27,24 @@ wrappers change — callers do not.
 """
 from __future__ import annotations
 
+import json
+
 from app import db
 
 # Effective group modes (mirror the DB enum `group_mode` = 'none'|'separate'|'visible').
 NONE = "none"
 SEPARATE = "separate"
 VISIBLE = "visible"
+
+# Canonical capability names (D-CAPNAME — the names actually seeded in the DB).
+CAP_ACCESS_ALL_GROUPS = "site:accessallgroups"
+CAP_MANAGE_GROUPS = "group:manage"
+
+# Per-group visibility (D-GRP-VIS enum `group_visibility`; Moodle lib/grouplib.php:61-79).
+VIS_ALL = "all"        # everyone sees the group and its members
+VIS_MEMBERS = "members"  # only members see the group + membership
+VIS_OWN = "own"        # members see the group but only themselves in it
+VIS_NONE = "none"      # nobody sees membership (group hidden as a partition)
 
 
 # ---------------------------------------------------------------------------
@@ -172,56 +184,124 @@ async def _is_active_enrolled(user_id: int, course_id: int) -> bool:
     return await is_active_enrolled(db, user_id, course_id)
 
 
-async def _has_accessallgroups(user_id: int, course_id: int) -> bool:
-    """`moodle/site:accessallgroups` for this user in this course.
+_CTX_CACHE: dict[int, int] = {}  # course_id → context_id (contexts don't move)
 
-    Prefers Khaled's `app.services.permissions.has_capability`; falls back to a
-    simplified resolution (an 'allow' at system/category/this-course context and
-    no 'prohibit'). The full allow/prevent/prohibit + context-depth engine is
-    Khaled's — this fallback is only good enough to demo HC-3 against the seed.
+
+async def _course_context_id(course_id: int) -> int | None:
+    """D-GRP-ARITY — a course id is NOT a context id (different keyspaces).
+    Passing the course id where has_capability wants a context id was the
+    T2-GRP-001 crash. Cached: a course's context id is stable, and the list/
+    scope paths resolve it per row otherwise (Tokyo RTT × N)."""
+    if course_id in _CTX_CACHE:
+        return _CTX_CACHE[course_id]
+    row = await db.fetch_one(
+        "select id from context where level = 'course' and instance_id = $1",
+        course_id,
+    )
+    if row:
+        _CTX_CACHE[course_id] = row["id"]
+        return row["id"]
+    return None
+
+
+async def _has_accessallgroups(user_id: int, course_id: int) -> bool:
+    """T2-GRP-001 — `site:accessallgroups` for this user in this course, via
+    Khaled's canonical resolver `has_capability(db, user_id, cap, context_id)`.
+
+    The course id is resolved to its *context* id first (D-GRP-ARITY). The full
+    allow/prevent/prohibit + context-depth engine lives in permissions.py; this
+    is a pure CALLER — the old prefixed-name fallback that ignored `prevent`
+    (and over-granted `ta.a`) is gone. Error boundary: unknown/not-held
+    capability → False (matches permissions.has_capability); a resolver failure
+    propagates so the route returns a clean 5xx, never a bare TypeError.
     """
+    from app.services.permissions import has_capability  # Khaled's canonical API
+
+    context_id = await _course_context_id(course_id)
+    if context_id is None:
+        return False
+    return await has_capability(db, user_id, CAP_ACCESS_ALL_GROUPS, context_id)
+
+
+# ---------------------------------------------------------------------------
+# Audit (D-AUDIT / R-AUDIT) — every membership & lifecycle change appends a
+# `group.*` row. Best-effort: a logging failure never fails the mutation.
+# ---------------------------------------------------------------------------
+async def _audit(event: str, *, actor_id: int | None, affected_id: int | None,
+                 course_id: int | None, detail: dict | None = None) -> None:
     try:
-        from app.services.permissions import has_capability  # Khaled's service
-    except Exception:
-        row = await db.fetch_one(
+        await db.fetch_one(
             """
-            select coalesce(bool_or(rc.permission = 'prohibit'), false) as prohibited,
-                   coalesce(bool_or(rc.permission = 'allow'),    false) as allowed
-              from role_assignment ra
-              join role_capability rc on rc.role_id = ra.role_id
-              join context ctx        on ctx.id     = ra.context_id
-             where ra.user_id = $1
-               and rc.capability = 'moodle/site:accessallgroups'
-               and (ctx.level = 'system'
-                    or ctx.level = 'category'
-                    or (ctx.level = 'course' and ctx.instance_id = $2))
+            insert into audit_log (event, actor_id, affected_id, course_id, detail)
+            values ($1, $2, $3, $4, $5::jsonb)
+            returning id
             """,
-            user_id,
-            course_id,
+            event, actor_id, affected_id, course_id, json.dumps(detail or {}),
         )
-        return bool(row and row["allowed"] and not row["prohibited"])
-    return await has_capability(user_id, "moodle/site:accessallgroups", course_id)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
 # Data access — groups, groupings, activity policy.
 # ---------------------------------------------------------------------------
-async def list_course_groups(course_id: int) -> list[dict]:
+async def _caller_scope(caller_id: int | None, course_id: int) -> dict:
+    """T2-GRP-002/004 — the authenticated caller's group scope in one course:
+      * aag      — holds access-all-groups (bypasses every group filter)
+      * own_ids  — the caller's own group ids in this course
+    caller_id None (interim, no principal) is treated as unscoped read for
+    back-compat with the current demo — the router adds the principal.
+    """
+    if caller_id is None:
+        return {"aag": True, "own_ids": []}
+    aag = await _has_accessallgroups(caller_id, course_id)
+    own = await db.fetch_all(
+        """
+        select m.group_id from group_member m
+          join course_group g on g.id = m.group_id
+         where m.user_id = $1 and g.course_id = $2
+        """,
+        caller_id, course_id,
+    )
+    return {"aag": aag, "own_ids": [r["group_id"] for r in own]}
+
+
+async def list_course_groups(course_id: int, caller_id: int | None = None) -> list[dict]:
+    """T2-GRP-002/004 — group list filtered in SQL by the caller's scope and
+    each group's visibility. accessallgroups bypasses; otherwise a MEMBERS/OWN/
+    NONE group the caller is not in is withheld (Moodle \\core_group\\visibility).
+    ALL groups are always listed."""
+    scope = await _caller_scope(caller_id, course_id)
     return await db.fetch_all(
         """
         select g.id, g.course_id, g.name, g.id_number, g.description,
                g.enrolment_key is not null as has_enrolment_key,
-               g.participation, g.created_at,
+               g.participation, g.visibility, g.created_at,
                (select count(*) from group_member m where m.group_id = g.id) as member_count
           from course_group g
          where g.course_id = $1
+           and (
+                $2::bool                               -- accessallgroups → all
+             or g.visibility = 'all'                   -- ALL → everyone
+             or g.id = any($3::bigint[])               -- caller's own groups
+           )
          order by g.name
         """,
-        course_id,
+        course_id, scope["aag"], scope["own_ids"],
     )
 
 
-async def group_members(group_id: int) -> list[dict]:
+async def group_members(group_id: int, caller_id: int | None = None) -> list[dict]:
+    """T2-GRP-002/004 — membership rows filtered in SQL by group mode, caller
+    scope, and per-group visibility. In separate mode a caller who shares no
+    group with the target sees nobody; a MEMBERS group is opaque to non-members;
+    OWN shows only the caller themself; NONE hides membership entirely (except
+    accessallgroups)."""
+    course_id = await _group_course_id(group_id)
+    if course_id is None:
+        return []
+    scope = await _caller_scope(caller_id, course_id)
+    is_member = group_id in scope["own_ids"]
     return await db.fetch_all(
         """
         select m.group_id, m.user_id, u.username,
@@ -230,10 +310,18 @@ async def group_members(group_id: int) -> list[dict]:
                (m.component = '') as manual
           from group_member m
           join app_user u on u.id = m.user_id
+          join course_group g on g.id = m.group_id
          where m.group_id = $1
+           and (
+                $2::bool                                          -- accessallgroups
+             or g.visibility = 'all'                             -- ALL: anyone may list
+             or (g.visibility = 'members' and $3::bool)          -- MEMBERS: only members
+             or (g.visibility = 'own' and $3::bool and m.user_id = $4)  -- OWN: only self
+             -- NONE: nobody (falls through) unless accessallgroups above
+           )
          order by u.last_name, u.first_name
         """,
-        group_id,
+        group_id, scope["aag"], is_member, caller_id or 0,
     )
 
 
@@ -379,10 +467,15 @@ async def group_access_check(
 # ---------------------------------------------------------------------------
 # Membership writes — this service is the SOLE writer of group_member.
 # ---------------------------------------------------------------------------
-async def add_member(group_id: int, user_id: int, component: str = "", item_id: int = 0) -> dict:
-    """SA-GRP-004 — refuse unless the user has an ACTIVE enrolment in the group's
-    course (Moodle's is_enrolled guard). This is the load-bearing difference
-    between a cohort (site bag) and a group (course partition)."""
+async def add_member(group_id: int, user_id: int, component: str = "", item_id: int = 0,
+                     *, actor_id: int | None = None) -> dict:
+    """T2-GRP-003 — provenance is SERVER-SET. `component`/`item_id` are a D-GM
+    SERVER contract, NOT a client input: the HTTP router calls this with the
+    defaults ('' / 0) for a manual add, and only Yaman's enrolment service
+    passes `enrol_self`/`enrol_cohort` + the method id. The client body carries
+    only {user_id} (schemas_groups.MemberAdd, extra='forbid'), so a forged
+    component can never reach here over HTTP (Moodle group/lib.php:77-101).
+    SA-GRP-004 enrolment guard and GRP-036 on-conflict-do-nothing preserved."""
     course_id = await _group_course_id(group_id)
     if course_id is None:
         return {"ok": False, "reason": "group does not exist"}
@@ -400,31 +493,35 @@ async def add_member(group_id: int, user_id: int, component: str = "", item_id: 
         component,
         item_id,
     )
+    await _audit("group.member_added", actor_id=actor_id, affected_id=user_id,
+                 course_id=course_id, detail={"group_id": group_id, "component": component})
     return {"ok": True, "group_id": group_id, "user_id": user_id, "component": component}
 
 
-async def remove_member(group_id: int, user_id: int, force: bool = False) -> dict:
-    """SA-GRP-006 — component-owned (machine-added) rows refuse normal removal
-    unless force=True, so an unenrol/sync stays the source of truth."""
+async def remove_member(group_id: int, user_id: int, force: bool = False,
+                        *, actor_id: int | None = None) -> dict:
+    """T2-GRP-003 — DEFAULT-ALLOW for a manager (Moodle group/lib.php:184-185):
+    a manager may remove a manual OR a component-owned row. Non-member removal is
+    idempotent success (GRP-021). The old deny-by-default on component rows was
+    the inverse of Moodle and is gone; `force` is retained only as an advisory
+    flag recorded in the audit trail (the capability gate lives in the router)."""
     row = await db.fetch_one(
         "select component from group_member where group_id = $1 and user_id = $2",
         group_id,
         user_id,
     )
     if row is None:
-        return {"ok": False, "reason": "not a member"}
-    if row["component"] and not force:
-        return {
-            "ok": False,
-            "reason": f"membership is owned by '{row['component']}'; pass force=true to override",
-            "component": row["component"],
-        }
+        return {"ok": True, "idempotent": True}  # GRP-021 — nothing to do
     await db.fetch_one(
         "delete from group_member where group_id = $1 and user_id = $2 returning group_id",
         group_id,
         user_id,
     )
-    return {"ok": True}
+    course_id = await _group_course_id(group_id)
+    await _audit("group.member_removed", actor_id=actor_id, affected_id=user_id,
+                 course_id=course_id,
+                 detail={"group_id": group_id, "was_component": row["component"], "force": force})
+    return {"ok": True, "removed_component": row["component"] or None}
 
 
 async def remove_members_by_provenance(
@@ -470,23 +567,40 @@ async def remove_all_memberships(course_id: int, user_id: int) -> int:
 # Group / grouping CRUD  (GRP-001: identity vs membership are separate rows).
 # ---------------------------------------------------------------------------
 async def create_group(course_id: int, name: str, id_number: str | None = None,
-                       enrolment_key: str | None = None) -> dict:
-    return await db.fetch_one(
+                       enrolment_key: str | None = None, *, actor_id: int | None = None) -> dict:
+    """GRP-001 — app-layer idnumbertaken guard (Moodle group/lib.php:271-276):
+    id_number must be unique within the course. No DDL — the check is here
+    because the schema deliberately has no unique constraint (Moodle parity)."""
+    if id_number:
+        dupe = await db.fetch_one(
+            "select id from course_group where course_id = $1 and id_number = $2",
+            course_id, id_number,
+        )
+        if dupe:
+            return {"ok": False, "reason": f"id_number '{id_number}' already used in this course"}
+    row = await db.fetch_one(
         """
         insert into course_group (course_id, name, id_number, enrolment_key)
         values ($1, $2, $3, $4)
-        returning id, course_id, name, id_number, participation, created_at
+        returning id, course_id, name, id_number, participation, visibility, created_at
         """,
         course_id, name, id_number, enrolment_key,
     )
+    await _audit("group.created", actor_id=actor_id, affected_id=row["id"],
+                 course_id=course_id, detail={"name": name})
+    return {"ok": True, **dict(row)}
 
 
-async def delete_group(group_id: int) -> dict:
+async def delete_group(group_id: int, *, actor_id: int | None = None) -> dict:
     """Deletes the group; group_member rows cascade. Enrolments and users are
     never touched (GRP-001)."""
+    course_id = await _group_course_id(group_id)
     row = await db.fetch_one(
         "delete from course_group where id = $1 returning id", group_id
     )
+    if row is not None:
+        await _audit("group.deleted", actor_id=actor_id, affected_id=group_id,
+                     course_id=course_id, detail={})
     return {"ok": row is not None}
 
 
@@ -525,3 +639,101 @@ async def set_activity_group_policy(
         f"update course_activity set {', '.join(sets)} where id = ${n} returning id", *args
     )
     return await activity_policy(activity_id)
+
+
+# ---------------------------------------------------------------------------
+# Grouping writes (§11) — the schemas existed but no route/service did.
+# ---------------------------------------------------------------------------
+async def create_grouping(course_id: int, name: str, description: str = "",
+                          *, actor_id: int | None = None) -> dict:
+    row = await db.fetch_one(
+        """
+        insert into grouping (course_id, name, description)
+        values ($1, $2, $3)
+        returning id, course_id, name, description, created_at
+        """,
+        course_id, name, description,
+    )
+    await _audit("grouping.created", actor_id=actor_id, affected_id=row["id"],
+                 course_id=course_id, detail={"name": name})
+    return {"ok": True, **dict(row)}
+
+
+async def assign_group_to_grouping(grouping_id: int, group_id: int,
+                                   *, actor_id: int | None = None) -> dict:
+    """Assign one group into a grouping (m2m). GRP-002: a grouping holds groups,
+    never users. Idempotent via the PK (grouping_id, group_id)."""
+    gr = await db.fetch_one("select course_id from grouping where id = $1", grouping_id)
+    g = await db.fetch_one("select course_id from course_group where id = $1", group_id)
+    if gr is None or g is None:
+        return {"ok": False, "reason": "unknown grouping or group"}
+    if gr["course_id"] != g["course_id"]:
+        return {"ok": False, "reason": "grouping and group are in different courses"}
+    await db.fetch_one(
+        """
+        insert into grouping_group (grouping_id, group_id)
+        values ($1, $2) on conflict (grouping_id, group_id) do nothing
+        returning grouping_id
+        """,
+        grouping_id, group_id,
+    )
+    await _audit("grouping.group_assigned", actor_id=actor_id, affected_id=group_id,
+                 course_id=gr["course_id"], detail={"grouping_id": grouping_id})
+    return {"ok": True, "grouping_id": grouping_id, "group_id": group_id}
+
+
+# ---------------------------------------------------------------------------
+# Activity availability restriction (T2-GRP-005, D-GRP-AVAIL).
+# Moodle availability/condition/{group,grouping}: an activity may be restricted
+# to members of a group (or any group if group_id 0) / any group in a grouping.
+# accessallgroups ALWAYS passes. `display` = hidden (invisible) vs greyed
+# (visible but locked). Selection (cm->groupingid) and restriction are orthogonal.
+# ---------------------------------------------------------------------------
+async def activity_availability(user_id: int, activity_id: int) -> dict:
+    """Evaluate every availability condition on an activity for one user.
+    Returns {available, display, conditions:[...]}. No conditions → open."""
+    pol = await activity_policy(activity_id)
+    if pol is None:
+        return {"error": "unknown activity"}
+    course_id = pol["course_id"]
+    conds = await db.fetch_all(
+        """
+        select a.id, a.group_id, a.grouping_id, a.display,
+               g.name as group_name, gr.name as grouping_name
+          from activity_availability a
+          left join course_group g on g.id = a.group_id
+          left join grouping gr     on gr.id = a.grouping_id
+         where a.activity_id = $1
+        """,
+        activity_id,
+    )
+    if not conds:
+        return {"activity_id": activity_id, "available": True, "display": None, "conditions": []}
+
+    if await _has_accessallgroups(user_id, course_id):
+        # V8 — accessallgroups holders always pass every group/grouping condition.
+        return {"activity_id": activity_id, "available": True, "display": None,
+                "conditions": [{"kind": "accessallgroups", "met": True}]}
+
+    my_group_ids = {g["id"] for g in await user_groups(user_id, course_id)}
+    results, all_met, display = [], True, None
+    for c in conds:
+        if c["group_id"] is not None:
+            met = c["group_id"] == 0 or c["group_id"] in my_group_ids
+            kind, label = "group", c["group_name"] or f"group {c['group_id']}"
+        else:
+            gg = await db.fetch_all(
+                "select group_id from grouping_group where grouping_id = $1", c["grouping_id"]
+            )
+            met = bool(my_group_ids & {r["group_id"] for r in gg})
+            kind, label = "grouping", c["grouping_name"] or f"grouping {c['grouping_id']}"
+        results.append({"kind": kind, "label": label, "met": met, "display": c["display"]})
+        if not met:
+            all_met = False
+            # a hidden condition hides the activity; greyed only locks it
+            if c["display"] == "hidden":
+                display = "hidden"
+            elif display is None:
+                display = "greyed"
+    return {"activity_id": activity_id, "available": all_met, "display": display,
+            "conditions": results}

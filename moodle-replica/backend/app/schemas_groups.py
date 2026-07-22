@@ -5,7 +5,7 @@ file-ownership rules.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---- requests ----
@@ -17,9 +17,13 @@ class GroupCreate(BaseModel):
 
 
 class MemberAdd(BaseModel):
+    """V3 (T2-GRP-003) — the client sends ONLY the user id. Provenance
+    (`component`/`item_id`) is server-set for manual adds; a client that still
+    posts those fields is rejected (`extra='forbid'`) so forged provenance can
+    never reach the DB via HTTP. Only Yaman's enrolment code writes enrol_*
+    rows, under the D-GM contract."""
+    model_config = ConfigDict(extra="forbid")
     user_id: int
-    component: str = ""
-    item_id: int = 0
 
 
 class GroupingCreate(BaseModel):

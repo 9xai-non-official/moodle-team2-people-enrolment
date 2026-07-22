@@ -8,6 +8,14 @@ import { mockRequest } from "./mocks";
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8010";
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "1";
 
+// Principal header (interim identity assertion — see backend app/deps.py).
+// ActingUser context keeps this in sync; the server validates the account
+// and makes every capability decision itself.
+let actingUserId = null;
+export function setApiActingUser(id) {
+  actingUserId = id;
+}
+
 // Global activity + write signals: the shell renders a thin top progress bar
 // while anything is in flight and a toast after successful writes — zero
 // per-component wiring, so no fetch can feel like a hang and no save can go
@@ -37,9 +45,12 @@ async function request(method, path, body) {
 
   signalActivity(+1);
   try {
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (actingUserId != null) headers["X-Acting-User"] = String(actingUserId);
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
