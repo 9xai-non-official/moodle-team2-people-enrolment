@@ -20,6 +20,7 @@ export default function AuthPage() {
   const [pendingUser, setPendingUser] = useState(null); // signup → confirm gate
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -146,8 +147,20 @@ export default function AuthPage() {
             }}
           >
             <div className="form-col">
-              <input className="input" placeholder="Username" value={form.username ?? ""} onChange={set("username")} autoFocus />
-              <input className="input" type="password" placeholder="Password" value={form.password ?? ""} onChange={set("password")} />
+              <input className="input" placeholder="Username" autoComplete="username" value={form.username ?? ""} onChange={set("username")} autoFocus />
+              <div className="form-row pw-row">
+                <input
+                  className="input input--wide"
+                  type={showPw ? "text" : "password"}
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  value={form.password ?? ""}
+                  onChange={set("password")}
+                />
+                <button type="button" className="btn" aria-label={showPw ? "Hide password" : "Show password"} onClick={() => setShowPw((v) => !v)}>
+                  {showPw ? "🙈" : "👁"}
+                </button>
+              </div>
               <button className="btn btn--primary" disabled={busy || !form.username || !form.password}>
                 Sign in
               </button>
@@ -170,8 +183,8 @@ export default function AuthPage() {
                 <input className="input" placeholder="First name" value={form.first_name ?? ""} onChange={set("first_name")} autoFocus />
                 <input className="input" placeholder="Last name" value={form.last_name ?? ""} onChange={set("last_name")} />
               </div>
-              <input className="input" placeholder="Username" value={form.username ?? ""} onChange={set("username")} />
-              <input className="input" type="password" placeholder="Password" value={form.password ?? ""} onChange={set("password")} />
+              <input className="input" placeholder="Username" autoComplete="username" value={form.username ?? ""} onChange={set("username")} />
+              <input className="input" type={showPw ? "text" : "password"} placeholder="Password" autoComplete="new-password" value={form.password ?? ""} onChange={set("password")} />
               <button
                 className="btn btn--primary"
                 disabled={busy || !form.username || !form.password || !form.first_name || !form.last_name}

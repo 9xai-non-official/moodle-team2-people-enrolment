@@ -199,7 +199,12 @@ function Shell() {
             </span>
           </span>
         )}
-        <button className="btn help-btn" title={session.mode === "explore" ? "Leave explore mode" : "Sign out"} onClick={signOut}>
+        <button
+          className="btn help-btn"
+          title={session.mode === "explore" ? "Leave explore mode" : "Sign out"}
+          aria-label={session.mode === "explore" ? "Leave explore mode" : "Sign out"}
+          onClick={signOut}
+        >
           ⎋
         </button>
         <div className={`api-status api-status--${health}`}>
@@ -208,6 +213,7 @@ function Shell() {
         <button
           className={`btn help-btn ${presenter ? "help-btn--on" : ""}`}
           title="Presenter mode — pins the demo script for the current page"
+          aria-label="Toggle presenter mode"
           onClick={togglePresenter}
         >
           🎤
@@ -215,6 +221,7 @@ function Shell() {
         <button
           className="btn help-btn"
           title="What is this app? (tour)"
+          aria-label="Open the welcome tour"
           onClick={() => setTourOpen(true)}
         >
           ?
