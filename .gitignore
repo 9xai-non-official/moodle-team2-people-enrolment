@@ -19,3 +19,6 @@ secrets.*
 *.key
 .vercel/
 .playwright-mcp/
+
+# Claude Code scratch worktrees (per-session, never shared)
+.claude/worktrees/
