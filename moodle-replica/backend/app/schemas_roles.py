@@ -53,10 +53,11 @@ class SetCapability(BaseModel):
 
 # --- assignments -----------------------------------------------------------
 class AssignRoleIn(BaseModel):
+    # No actor_id: the acting identity comes from the authenticated principal
+    # (Depends(get_current_user)), never from the request body.
     user_id: int
     role_id: int
     context_id: int
-    actor_id: int
 
 
 # --- permission check (the centrepiece) ------------------------------------
@@ -68,6 +69,12 @@ class CheckRequest(BaseModel):
     activity_id: Optional[int] = None
     simulate_role_id: Optional[int] = None
     action: Optional[str] = None
+
+
+class DevLoginRequest(BaseModel):
+    # DEV ONLY (gated by AUTH_DEV_LOGIN): mint a session token for a demo user.
+    username: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class CheckResponse(BaseModel):

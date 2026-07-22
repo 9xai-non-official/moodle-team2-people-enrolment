@@ -274,3 +274,273 @@ def test_decisions_decodes_reasons_json():
     rows = asyncio.run(permissions.decisions(db, actor_id=None, limit=10))
     assert isinstance(rows[0]["reasons"], dict)
     assert rows[0]["reasons"]["decision"] == "DENY"
+
+
+# ===========================================================================
+# WP04 · Authentication (app/services/auth.py) — the acting principal must come
+# from a VERIFIED credential, never a request field. Pure verifier unit tests
+# (no app, no DB).
+# ===========================================================================
+from app.services import auth  # noqa: E402
+
+
+def test_hmac_token_roundtrip_yields_principal():
+    v = auth.HmacTokenVerifier("s3cret")
+    tok = auth.issue_token(42, secret="s3cret", username="teacher.a")
+    p = v.verify(tok)
+    assert p is not None and p.user_id == 42 and p.username == "teacher.a"
+
+
+def test_tampered_token_is_rejected():
+    v = auth.HmacTokenVerifier("s3cret")
+    tok = auth.issue_token(42, secret="s3cret")
+    payload_b64, sig = tok.rsplit(".", 1)
+    forged = auth.issue_token(999, secret="s3cret").split(".", 1)[0] + "." + sig
+    assert v.verify(forged) is None  # signature no longer matches the payload
+
+
+def test_wrong_secret_is_rejected():
+    tok = auth.issue_token(42, secret="s3cret")
+    assert auth.HmacTokenVerifier("different").verify(tok) is None
+
+
+def test_missing_secret_authenticates_nobody():
+    # Fail-closed: with no AUTH_SECRET the default verifier rejects everything
+    # rather than falling open.
+    tok = auth.issue_token(42, secret="s3cret")
+    assert auth.HmacTokenVerifier(None).verify(tok) is None
+
+
+def test_expired_token_is_rejected():
+    v = auth.HmacTokenVerifier("s3cret")
+    tok = auth.issue_token(42, secret="s3cret", ttl_seconds=-1)
+    assert v.verify(tok) is None
+
+
+def test_garbage_credentials_are_rejected():
+    v = auth.HmacTokenVerifier("s3cret")
+    assert v.verify("") is None
+    assert v.verify("not-a-token") is None
+    assert v.verify("a.b.c.d") is None
+
+
+def test_non_ascii_credential_fails_closed_without_raising():
+    # Review finding: Starlette decodes header bytes as latin-1, so a crafted
+    # `Authorization: Bearer é.abc` reaches verify() with non-ASCII code points.
+    # Must fail-closed (return None), never raise (which would surface as a 500).
+    v = auth.HmacTokenVerifier("s3cret")
+    assert v.verify("é.abc") is None       # non-ASCII payload segment
+    assert v.verify("abc.é") is None       # non-ASCII signature segment
+    assert v.verify("\x80\x81.\x82") is None
+
+
+# ===========================================================================
+# WP04 · No mutation (or the /check endpoint) may run without a verified
+# credential. Every protected route → 401 when unauthenticated. Hermetic:
+# DATABASE_URL is cleared so no live connection is attempted; auth runs first.
+# ===========================================================================
+import os as _os  # noqa: E402
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from main import app  # noqa: E402  (import runs app.db.load_dotenv())
+
+_os.environ.pop("DATABASE_URL", None)  # keep hermetic AFTER import (load_dotenv ran)
+_client = TestClient(app)
+
+# Bodies are valid so the ONLY thing missing is the credential → deterministic 401.
+_PROTECTED = [
+    ("post", "/api/permissions/check",
+     {"actor_user_id": 1, "capability": "course:view", "context_id": 1}),
+    ("post", "/api/roles", {"short_name": "x", "name": "X"}),
+    ("post", "/api/roles/1/clone", {"short_name": "x", "name": "X"}),
+    ("put", "/api/roles/1/capabilities",
+     {"context_id": 1, "capability": "course:view", "permission": "allow"}),
+    ("post", "/api/roles/assignments", {"user_id": 1, "role_id": 1, "context_id": 1}),
+    ("delete", "/api/roles/assignments/1", None),
+    ("get", "/api/roles/assignable?context_id=1", None),
+]
+
+
+def test_protected_routes_require_authentication():
+    for method, url, body in _PROTECTED:
+        resp = getattr(_client, method)(url, **({"json": body} if body is not None else {}))
+        assert resp.status_code == 401, f"{method.upper()} {url} → {resp.status_code}, expected 401"
+
+
+# ===========================================================================
+# WP04 · Authorization on every mutating action. A caller lacking the required
+# capability → PermissionError (the router maps it to 403) and NO row is written.
+# Admin (config-list identity) bypasses via require_capability. A bad capability
+# name in set_override is a ValueError (→400), never a 500.
+# ===========================================================================
+import pytest  # noqa: E402
+
+
+class FakeMutDB:
+    """Captures every write statement and canned-answers the reads a mutation
+    issues. `admin` decides whether the actor is a site admin (which bypasses
+    require_capability). `capability_known` toggles the capability catalogue."""
+
+    def __init__(self, *, admin=False, capability_known=True, assignment=None, suspended=False):
+        self.admin = admin
+        self.capability_known = capability_known
+        self.assignment = assignment
+        self.suspended = suspended
+        self.writes = []  # (verb, normalized_sql, args)
+
+    def _norm(self, q):
+        return " ".join(q.split())
+
+    def _record(self, n, a):
+        head = n.strip().split(" ", 1)[0].lower()
+        if head in ("insert", "delete", "update"):
+            self.writes.append((head, n, a))
+
+    def wrote(self, fragment):
+        return any(fragment in n for _, n, _ in self.writes)
+
+    async def fetch_one(self, q, *a):
+        n = self._norm(q)
+        self._record(n, a)
+        if "from app_user where id=$1" in n:
+            return {"id": a[0], "username": "admin1" if self.admin else "u.actor",
+                    "suspended": self.suspended, "deleted_at": None}
+        if "from capability where name=$1" in n:
+            return ({"name": a[0], "cap_type": "write", "min_context_level": "course",
+                     "risks": []} if self.capability_known else None)
+        if "from context where level='system'" in n:
+            return {"id": 1}
+        if "select archetype from role where id=$1" in n:
+            return {"archetype": "teacher"}
+        if "select short_name from role where id=$1" in n:
+            return {"short_name": "teacher"}
+        if "from role_assignment where id=$1" in n:
+            return self.assignment
+        if n.startswith("insert into role_capability"):
+            return {"id": 88, "role_id": a[0], "context_id": a[1], "capability": a[2],
+                    "permission": a[3] if len(a) > 3 else "allow"}
+        if n.startswith("insert into role_assignment"):
+            return {"id": 99, "user_id": a[0], "role_id": a[1], "context_id": a[2],
+                    "component": "", "assigned_by": a[3], "assigned_at": None}
+        if n.startswith("insert into role "):
+            return {"id": 77, "short_name": a[0], "name": a[1], "description": a[2],
+                    "archetype": a[3], "sort_order": 9}
+        if n.startswith("delete from role_assignment"):
+            return {"id": a[0]}
+        if n.startswith("delete from role_capability"):
+            return {"id": 88}
+        if "insert into audit_log" in n or "insert into permission_decision" in n:
+            return {"id": 1}
+        return None
+
+    async def fetch_all(self, q, *a):
+        n = self._norm(q)
+        self._record(n, a)
+        if n.startswith("insert into role_capability"):  # clone copies rows here
+            return [{"id": 1}]
+        return []
+
+
+def _deny_capability(monkeypatch):
+    async def deny(*a, **k):
+        return False
+    monkeypatch.setattr(permissions, "has_capability", deny)
+
+
+def test_set_override_denied_without_capability_writes_nothing(monkeypatch):
+    _deny_capability(monkeypatch)
+    db = FakeMutDB(admin=False)
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.set_override(db, 30, 3, "activity:grade", "allow", actor_id=7))
+    assert not db.wrote("insert into role_capability")
+
+
+def test_create_role_denied_without_capability_writes_nothing(monkeypatch):
+    _deny_capability(monkeypatch)
+    db = FakeMutDB(admin=False)
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.create_role(db, "ta2", "TA2", "", "teacher", actor_id=7))
+    assert not db.wrote("insert into role ")
+
+
+def test_clone_role_denied_without_capability_writes_nothing(monkeypatch):
+    _deny_capability(monkeypatch)
+    db = FakeMutDB(admin=False)
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.clone_role(db, 30, "ta2", "TA2", "", actor_id=7))
+    assert not db.wrote("insert into role ")
+
+
+def test_unassign_role_denied_without_capability_writes_nothing(monkeypatch):
+    _deny_capability(monkeypatch)
+    db = FakeMutDB(admin=False,
+                   assignment={"id": 5, "user_id": 50, "role_id": 30, "context_id": 3, "component": ""})
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.unassign_role(db, 5, actor_id=7))
+    assert not db.wrote("delete from role_assignment")
+
+
+def test_unassign_role_refuses_enrolment_owned_row():
+    # The existing refusal of enrol_%-owned rows must survive (403), even for admin.
+    db = FakeMutDB(admin=True,
+                   assignment={"id": 5, "user_id": 50, "role_id": 30, "context_id": 3,
+                               "component": "enrol_cohort"})
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.unassign_role(db, 5, actor_id=1))
+    assert not db.wrote("delete from role_assignment")
+
+
+def test_set_override_unknown_capability_is_validation_error():
+    # admin bypasses authorization; a bad capability name must be a ValueError
+    # (router → 400), never an uncaught FK 500.
+    db = FakeMutDB(admin=True, capability_known=False)
+    with pytest.raises(ValueError):
+        asyncio.run(permissions.set_override(db, 30, 3, "bogus:cap", "allow", actor_id=1))
+    assert not db.wrote("insert into role_capability")
+
+
+def test_admin_can_create_role_and_writes_audit():
+    db = FakeMutDB(admin=True)
+    res = asyncio.run(permissions.create_role(db, "ta2", "TA2", "", "teacher", actor_id=1))
+    assert res["id"] == 77
+    assert db.wrote("insert into role ")
+    assert db.wrote("insert into audit_log")
+
+
+def test_admin_can_unassign_manual_row_and_writes_audit():
+    db = FakeMutDB(admin=True,
+                   assignment={"id": 5, "user_id": 50, "role_id": 30, "context_id": 3, "component": ""})
+    res = asyncio.run(permissions.unassign_role(db, 5, actor_id=1))
+    assert res["deleted"] is True
+    assert db.wrote("delete from role_assignment")
+    assert db.wrote("insert into audit_log")
+
+
+def test_suspended_actor_cannot_mutate_even_as_admin():
+    # Review findings: account state (suspended) must block the write path BEFORE
+    # the admin bypass, mirroring build_decision gate 1. No row is written.
+    db = FakeMutDB(admin=True, suspended=True)
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.create_role(db, "x", "X", "", "teacher", actor_id=1))
+    assert not db.wrote("insert into role ")
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.set_override(db, 1, 3, "activity:grade", "allow", actor_id=1))
+    assert not db.wrote("insert into role_capability")
+    db2 = FakeMutDB(admin=True, suspended=True,
+                    assignment={"id": 5, "user_id": 50, "role_id": 30, "context_id": 3, "component": ""})
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.unassign_role(db2, 5, actor_id=1))
+    assert not db2.wrote("delete from role_assignment")
+
+
+def test_suspended_actor_has_no_capability():
+    db = FakeMutDB(admin=False, suspended=True)
+    assert asyncio.run(permissions.has_capability(db, 7, "role:override", 3)) is False
+
+
+def test_suspended_actor_cannot_assign_role():
+    db = FakeMutDB(admin=True, suspended=True)
+    with pytest.raises(PermissionError):
+        asyncio.run(permissions.assign_role(db, user_id=50, role_id=40, context_id=3, actor_id=1))
+    assert not db.wrote("insert into role_assignment")
