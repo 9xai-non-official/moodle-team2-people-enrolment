@@ -333,6 +333,43 @@ def test_cohort_sync_unenrol_policy():
 
 
 # ---------------------------------------------------------------------------
+# R-COHORT (ENR-013) — an active cohort path resists MANUAL unenrol; the sync
+# still removes it; suspending first re-opens manual unenrol.
+# ---------------------------------------------------------------------------
+
+def test_cohort_active_unenrol_blocked():
+    async def scenario():
+        c = await svc.create_cohort(db, "scratch-rcohort", "SCRATCH-RC")
+        cid = c["cohort"]["id"]
+        mid = None
+        try:
+            mid = (await svc.create_method(
+                db, LAB1, "cohort", cohort_id=cid,
+                default_role_id=STUDENT_ROLE))["method"]["id"]
+            await db.fetch_all(
+                "insert into cohort_member (cohort_id, user_id) values ($1,$2) "
+                "returning user_id", cid, ALICE)
+            await svc.sync_cohort_method(db, mid, actor_id=ADMIN)
+            assert await svc.is_active_enrolled(db, ALICE, LAB1)
+
+            # manual unenrol of the ACTIVE cohort path is refused (409/ENR-013)
+            res = await svc.unenrol_user(db, mid, ALICE, actor_id=ADMIN)
+            assert res["ok"] is False and res["http_status"] == 409
+            assert await svc.is_active_enrolled(db, ALICE, LAB1), \
+                "refused unenrol must not have removed the row"
+
+            # suspend first → manual unenrol now allowed
+            await svc.suspend(db, mid, ALICE)
+            res = await svc.unenrol_user(db, mid, ALICE, actor_id=ADMIN)
+            assert res["ok"] is True
+            assert not await svc.is_enrolled(db, ALICE, LAB1)
+        finally:
+            await _cleanup_scratch(method_ids=[mid] if mid else [],
+                                   cohort_ids=[cid])
+    run(scenario())
+
+
+# ---------------------------------------------------------------------------
 # §6.7 — guest: no enrolment rows ever; one instance per course (code-enforced)
 # ---------------------------------------------------------------------------
 

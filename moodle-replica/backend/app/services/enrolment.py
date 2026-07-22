@@ -295,11 +295,17 @@ async def enrol_user(db, method_id: int, user_id: int, *,
 
 async def unenrol_user(db, method_id: int, user_id: int, *,
                        actor_id: int | None = None,
+                       _cohort_sync: bool = False,
                        _group_ops: list | None = None) -> dict:
     """Remove ONE path: its enrolment row + role rows matching MY
     component+item_id only, then the last-path check (§6.10 / Hard Case #2).
     Completion rows are NEVER deleted — progress resumes on re-enrolment.
-    Group deletions are deferred to after commit (see _groups_call)."""
+    Group deletions are deferred to after commit (see _groups_call).
+
+    R-COHORT (ENR-013, Moodle enrol/cohort/lib.php allow_unenrol_user): an
+    ACTIVE cohort-synced path cannot be manually unenrolled — cohort
+    membership is the source of truth, so suspend it first (or let the sync
+    remove it). The sync itself passes _cohort_sync=True to bypass this."""
     ops: list = [] if _group_ops is None else _group_ops
     async with _tx(db) as conn:
         method = await _method(conn, method_id)
@@ -307,6 +313,16 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             return {"ok": False, "reason": f"enrolment method {method_id} not found"}
         course_id = method["course_id"]
         component = _component(method["method"])
+
+        if method["method"] == "cohort" and not _cohort_sync:
+            current = await _one(conn,
+                "select status from enrolment "
+                "where method_id = $1 and user_id = $2", method_id, user_id)
+            if current is not None and current["status"] == "active":
+                return {"ok": False, "http_status": 409,
+                        "reason": "an active cohort enrolment cannot be "
+                                  "manually unenrolled — suspend it first, or "
+                                  "remove the user from the cohort (ENR-013)"}
 
         deleted = await _all(conn, """
             delete from enrolment where method_id = $1 and user_id = $2
@@ -545,7 +561,7 @@ async def sync_cohort_method(db, method_id: int, *,
                             {"component": "enrol_cohort", "item_id": method_id}))
         for uid in sorted(set(enrolled) - members):
             await unenrol_user(conn, method_id, uid, actor_id=actor_id,
-                               _group_ops=ops)
+                               _cohort_sync=True, _group_ops=ops)
             removed.append(uid)
 
     # tx committed — run the accumulated group side-effects.

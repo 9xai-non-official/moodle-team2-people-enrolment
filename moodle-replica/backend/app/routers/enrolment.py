@@ -46,9 +46,12 @@ router = APIRouter(prefix="/api/enrolment", tags=["enrolment"])
 
 def _ok(result: dict, status_code: int = 400) -> dict:
     """Service refusals ({'ok': False, 'reason': …}) become HTTP errors with
-    the reason in `detail` — never swallowed."""
+    the reason in `detail` — never swallowed. A refusal may override the
+    caller's default code with its own `http_status` (e.g. R-COHORT → 409
+    even on a route whose default is 404)."""
     if isinstance(result, dict) and result.get("ok") is False:
-        raise HTTPException(status_code=status_code, detail=result["reason"])
+        raise HTTPException(status_code=result.get("http_status", status_code),
+                            detail=result["reason"])
     return result
 
 
