@@ -125,4 +125,30 @@ refuses(403, () => call("DELETE", "/api/lms/courses/4", null, { actor_id: "2" })
 const del = call("DELETE", "/api/lms/courses/4", null, { actor_id: "1" });
 assert.ok(del.note.includes("snapshots survive") || del.note.includes("hard case 5"));
 
+// -- profile: password proof required; name change propagates
+refuses(403, () => call("PATCH", "/api/auth/profile", { user_id: user.id, current_password: "wrong", new_password: "np" }));
+const renamed = call("PATCH", "/api/auth/profile", { user_id: user.id, first_name: "Checked", current_password: "pw", new_password: "pw2" });
+assert.equal(renamed.full_name.split(" ")[0], "Checked");
+call("POST", "/api/auth/login", { username: "check.u", password: "pw2" });
+
+// -- my-grades: graded submission + released quiz total both appear
+const grades = call("GET", "/api/lms/my-grades", null, { user_id: "7" });
+assert.ok(grades.some((g) => g.kind === "assignment" && g.score === 70), "Basel's assignment grade listed");
+assert.ok(grades.some((g) => g.kind === "quiz" && g.score === 9), "Basel's quiz total listed");
+
+// -- manager toggle: grant, self-revoke refusal, revoke
+refuses(403, () => call("POST", `/api/lms/users/${staff.id}/toggle-manager`, { actor_id: 2 }));
+assert.equal(call("POST", `/api/lms/users/${staff.id}/toggle-manager`, { actor_id: 1 }).manager, true);
+refuses(409, () => call("POST", "/api/lms/users/1/toggle-manager", { actor_id: 1 })); // no self-lockout
+assert.equal(call("POST", `/api/lms/users/${staff.id}/toggle-manager`, { actor_id: 1 }).manager, false);
+
+// -- activity edit: rename + attempts; grading queue counts for teachers
+call("PATCH", "/api/lms/activities/102", { actor_id: 2, name: "Quiz 1 (v2)", attempts_allowed: 5 });
+const tActs = call("GET", "/api/lms/courses/1/activities", null, { user_id: "2" });
+const q102 = tActs.find((a) => a.id === 102);
+assert.equal(q102.name, "Quiz 1 (v2)");
+assert.ok(q102.queue && typeof q102.queue.pending_essays === "number", "teacher sees the marking queue");
+const sActs = call("GET", "/api/lms/courses/1/activities", null, { user_id: "7" });
+assert.equal(sActs.find((a) => a.id === 102).queue, undefined, "students never see the queue");
+
 console.log(`lms self-check OK — ${USERS.length} users, ${ENROLMENTS.length} enrolments in final state`);

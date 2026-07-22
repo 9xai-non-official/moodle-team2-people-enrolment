@@ -38,7 +38,9 @@ export const SCRIPT = {
     "Quiz 1 → start attempt → answer → Finish: auto-marked instantly, essay 'awaiting marking'.",
   ],
   Admin: [
+    "Overview strip: pending course requests jump straight to Teaching → New course.",
     "As admin1: create an account — it signs in IMMEDIATELY (no confirm email; that gate is self-registration's only).",
+    "'make manager' grants full site powers at System; revoking your OWN manager role refuses — no self-lockout.",
     "Suspend an account → its sign-in refuses, yet every roster still lists them (suspension ≠ deletion).",
     "Courses tab: hide LAB1 → it leaves the catalog untouched inside; delete it → Progress → History still answers (hard case 5).",
     "Try suspending yourself — refused: no self-lockout.",

@@ -243,7 +243,74 @@ export const routes = [
     },
   },
 
+  // == profile: own account maintenance ===================================
+  {
+    // Change your own name/password. Credentialed (signup/admin-created)
+    // accounts must prove the current password; seed personas have none.
+    method: "PATCH",
+    pattern: /^\/api\/auth\/profile$/,
+    handler: (m, body) => {
+      const user = userById(Number(body.user_id));
+      if (!user) throw new ApiError(404, { detail: "unknown user" });
+      const cred = CREDENTIALS.get(user.id);
+      if (body.new_password) {
+        if (cred && cred.password !== body.current_password)
+          throw new ApiError(403, { reasons: ["current password is wrong — no password change without it"] });
+        CREDENTIALS.set(user.id, { password: body.new_password, confirmed: cred?.confirmed ?? true });
+      }
+      if (body.first_name) user.first_name = body.first_name;
+      if (body.last_name) user.last_name = body.last_name;
+      user.full_name = `${user.first_name} ${user.last_name}`;
+      return user;
+    },
+  },
+  {
+    // Everything marked, in one strip: graded submissions + released quiz totals.
+    method: "GET",
+    pattern: /^\/api\/lms\/my-grades$/,
+    handler: (m, body, query) => {
+      const userId = Number(query.user_id);
+      const rows = [];
+      for (const s of SUBMISSIONS.filter((x) => x.user_id === userId && x.status === "graded")) {
+        const a = activityById(s.activity_id);
+        const c = courseById(a?.course_id);
+        rows.push({ course: c?.short_name, activity: a?.name, kind: "assignment", score: s.grade, max: 100, feedback: s.feedback });
+      }
+      for (const at of QUIZ_ATTEMPTS.filter((x) => x.user_id === userId && x.state === "graded")) {
+        const a = activityById(at.activity_id);
+        const c = courseById(a?.course_id);
+        const quiz = quizForActivity(at.activity_id);
+        rows.push({ course: c?.short_name, activity: a?.name, kind: "quiz", score: at.total, max: quiz ? quiz.questions.reduce((s2, q) => s2 + q.points, 0) : null, feedback: null });
+      }
+      return rows;
+    },
+  },
+
   // == admin: user + course administration ================================
+  {
+    // Grant/revoke the Manager role at System — the "roles etc" lever.
+    // No self-demotion: the last thing an admin does is lock themselves out.
+    method: "POST",
+    pattern: /^\/api\/lms\/users\/(\d+)\/toggle-manager$/,
+    handler: (m, body) => {
+      const actorId = Number(body.actor_id);
+      if (!isAdmin(actorId))
+        throw new ApiError(403, { reasons: ["only a manager may grant or revoke the manager role"] });
+      const target = userById(Number(m[1]));
+      if (!target) throw new ApiError(404, { detail: "user not found" });
+      const existing = ROLE_ASSIGNMENTS.find(
+        (a) => a.user_id === target.id && a.role_id === 1 && a.context_id === 1,
+      );
+      if (existing) {
+        if (target.id === actorId)
+          throw new ApiError(409, { detail: "you cannot revoke your own manager role — no self-lockout" });
+        ROLE_ASSIGNMENTS.splice(ROLE_ASSIGNMENTS.indexOf(existing), 1);
+        return { manager: false };
+      }
+      ROLE_ASSIGNMENTS.push({ id: nextId(ROLE_ASSIGNMENTS), user_id: target.id, role_id: 1, context_id: 1, component: "", item_id: 0 });
+      return { manager: true };
+    },
+  },
   {
     // Admin-created accounts are usable immediately — no confirmation email
     // (that gate belongs to self-registration only). Moodle-faithful.
@@ -470,6 +537,12 @@ export const routes = [
           ],
         });
       if (typeof body.visible === "boolean") activity.visible = body.visible;
+      if (body.name) activity.name = body.name;
+      if (body.attempts_allowed != null) {
+        const quiz = quizForActivity(activity.id);
+        if (!quiz) throw new ApiError(400, { detail: "attempts_allowed only applies to quizzes" });
+        quiz.attempts_allowed = Math.max(1, Number(body.attempts_allowed));
+      }
       return activity;
     },
   },
@@ -661,7 +734,17 @@ export const routes = [
       const asTeacher = teaches(userId, courseId);
       return ACTIVITIES.filter((a) => a.course_id === courseId)
         .filter((a) => asTeacher || a.visible) // hidden activities vanish for students, exactly like Moodle
-        .map((a) => ({ ...a, mine: myActivityStatus(a, userId) }));
+        .map((a) => ({
+          ...a,
+          mine: myActivityStatus(a, userId),
+          // teachers see their marking queue at a glance
+          queue: asTeacher
+            ? {
+                pending_submissions: SUBMISSIONS.filter((s) => s.activity_id === a.id && s.status === "submitted").length,
+                pending_essays: QUIZ_ATTEMPTS.filter((x) => x.activity_id === a.id && x.state === "finished").length,
+              }
+            : undefined,
+        }));
     },
   },
 
