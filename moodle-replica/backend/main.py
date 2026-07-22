@@ -47,6 +47,17 @@ app.add_middleware(
 )
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    """Friendly landing for the bare API domain — people WILL open it."""
+    return {
+        "service": "WhoCan API — people & enrolment",
+        "app": "https://whocan.vercel.app",
+        "health": "/api/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/api/health", tags=["health"])
 async def health():
     """Liveness + DB reachability (proves the deployed schema answers)."""
