@@ -243,6 +243,87 @@ export const routes = [
     },
   },
 
+  // == admin: user + course administration ================================
+  {
+    // Admin-created accounts are usable immediately — no confirmation email
+    // (that gate belongs to self-registration only). Moodle-faithful.
+    method: "POST",
+    pattern: /^\/api\/lms\/users$/,
+    handler: (m, body) => {
+      if (!isAdmin(Number(body.actor_id)))
+        throw new ApiError(403, { reasons: ["only a manager may create user accounts"] });
+      const { username, first_name, last_name, password } = body;
+      if (!username || !first_name || !last_name || !password)
+        throw new ApiError(400, { detail: "username, first_name, last_name and password are all required" });
+      if (USERS.some((u) => u.username === username))
+        throw new ApiError(409, { detail: `username '${username}' is taken` });
+      const user = {
+        id: nextId(USERS),
+        username,
+        first_name,
+        last_name,
+        full_name: `${first_name} ${last_name}`,
+        suspended: false,
+      };
+      USERS.push(user);
+      CREDENTIALS.set(user.id, { password, confirmed: true }); // no email gate
+      return user;
+    },
+  },
+  {
+    // Site-wide account suspension: sign-in refused, but enrolments, grades
+    // and completions stay untouched — the roster keeps showing them (C-6).
+    method: "PATCH",
+    pattern: /^\/api\/lms\/users\/(\d+)$/,
+    handler: (m, body) => {
+      const actorId = Number(body.actor_id);
+      if (!isAdmin(actorId))
+        throw new ApiError(403, { reasons: ["only a manager may suspend or reactivate accounts"] });
+      const user = userById(Number(m[1]));
+      if (!user) throw new ApiError(404, { detail: "user not found" });
+      if (user.id === actorId && body.suspended === true)
+        throw new ApiError(409, { detail: "you cannot suspend your own account — that would lock you out" });
+      if (typeof body.suspended === "boolean") user.suspended = body.suspended;
+      return user;
+    },
+  },
+  {
+    // Course visibility: hidden courses vanish from the catalog but nothing
+    // inside them is touched. Editing teachers may hide their own course.
+    method: "PATCH",
+    pattern: /^\/api\/lms\/courses\/(\d+)$/,
+    handler: (m, body) => {
+      const course = courseById(Number(m[1]));
+      if (!course) throw new ApiError(404, { detail: "course not found" });
+      const actorId = Number(body.actor_id);
+      const t = teacherRoleAt(actorId, course.id);
+      if (!isAdmin(actorId) && !t.editing)
+        throw new ApiError(403, { reasons: ["only a manager or this course's editing teacher may change course visibility"] });
+      if (typeof body.visible === "boolean") course.visible = body.visible;
+      return course;
+    },
+  },
+  {
+    // Course soft-delete — hard case 5 made operational: the course is gone
+    // from every list, but progress snapshots and completions survive and
+    // the History tab still answers for it. Managers only.
+    method: "DELETE",
+    pattern: /^\/api\/lms\/courses\/(\d+)$/,
+    handler: (m, body, query) => {
+      if (!isAdmin(Number(query.actor_id)))
+        throw new ApiError(403, { reasons: ["only a manager may delete a course"] });
+      const course = courseById(Number(m[1]));
+      if (!course) throw new ApiError(404, { detail: "course not found" });
+      if (course.deleted) throw new ApiError(409, { detail: "course already deleted" });
+      course.deleted = true;
+      course.visible = false;
+      return {
+        deleted: true,
+        note: "soft-deleted — enrolment paths die with it, but completions and progress snapshots survive (hard case 5); see Progress → History",
+      };
+    },
+  },
+
   // == teacher: roster management =========================================
   {
     // Manual enrolment from the roster — Moodle's Participants "Enrol users".
