@@ -10,13 +10,23 @@ Run:  ./.venv/bin/pip install -r tests/requirements-dev.txt
       ./.venv/bin/python -m pytest tests/test_enrolment.py -v
 """
 import asyncio
+import os
 import pathlib
 import re
 
 import pytest
+from dotenv import dotenv_values
 
 from app import db
 from app.services import enrolment as svc
+
+# The hermetic modules (test_api_smoke, test_check_integration) pop
+# DATABASE_URL from the process env at import, so in a whole-suite run it is
+# gone by the time these tests execute. Read it from .env WITHOUT touching
+# os.environ at import (their 503-without-db test needs it absent while THEY
+# run) and re-inject lazily inside run(), which only executes with our tests.
+_ENV_URL = (dotenv_values(pathlib.Path(__file__).resolve().parents[1] / ".env")
+            .get("DATABASE_URL") or os.environ.get("DATABASE_URL"))
 
 # Scratch identities (seeded for exactly this purpose) — never seed students.
 ALICE, BOB = 4, 5           # demo_alice / demo_bob
@@ -28,6 +38,8 @@ STUDENT_ROLE = 4
 
 def run(coro):
     """Each test gets a fresh loop + pool (asyncpg pools are loop-bound)."""
+    if _ENV_URL:
+        os.environ["DATABASE_URL"] = _ENV_URL
     async def wrapped():
         await db.connect()
         try:
@@ -135,6 +147,57 @@ def test_suspend_keeps_roles():
                 "where user_id=$1 and component='enrol_manual' and item_id=$2",
                 ALICE, mid)
             assert len(roles) == 1, "suspend must never touch roles"
+        finally:
+            await _cleanup_scratch(method_ids=[mid])
+    run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# T2-ENR-002 (ENR-010) — re-enrol preserves state; explicit activate opts in
+# ---------------------------------------------------------------------------
+
+def test_reenrol_preserves_suspension():
+    """A duplicate enrol must NOT silently reactivate a suspended row —
+    activate=True is the only way back to active. And a bare re-enrol leaves
+    the time window alone (supplied-fields-only, Moodle update_user_enrol)."""
+    async def scenario():
+        mid = await _make_method()
+        try:
+            end = (await db.fetch_one(
+                "select date_trunc('second', now() + interval '30 day') t"))["t"]
+            await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN, time_end=end)
+            await svc.suspend(db, mid, ALICE)
+
+            res = await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN)
+            assert res["ok"], res
+            assert res["enrolment"]["status"] == "suspended", \
+                "re-enrol silently reactivated a suspended row"
+            assert res["enrolment"]["time_end"] == end, \
+                "re-enrol clobbered an unsupplied time_end"
+
+            res = await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN,
+                                       activate=True)
+            assert res["enrolment"]["status"] == "active"
+            assert res["enrolment"]["time_end"] == end
+        finally:
+            await _cleanup_scratch(method_ids=[mid])
+    run(scenario())
+
+
+def test_status_flip_is_change_gated():
+    """A no-op suspend/reactivate reports changed=False and leaves updated_at
+    alone (ENR-010 change-gating)."""
+    async def scenario():
+        mid = await _make_method()
+        try:
+            await svc.enrol_user(db, mid, ALICE, actor_id=ADMIN)
+            first = await svc.suspend(db, mid, ALICE)
+            assert first["ok"] and first["changed"] is True
+            stamp = first["enrolment"]["updated_at"]
+            again = await svc.suspend(db, mid, ALICE)
+            assert again["ok"] and again["changed"] is False
+            assert again["enrolment"]["updated_at"] == stamp, \
+                "no-op flip rewrote the row"
         finally:
             await _cleanup_scratch(method_ids=[mid])
     run(scenario())
@@ -266,6 +329,128 @@ def test_cohort_sync_unenrol_policy():
         finally:
             await _cleanup_scratch(method_ids=[mid] if mid else [],
                                    cohort_ids=[cid])
+    run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# R-COHORT (ENR-013) — an active cohort path resists MANUAL unenrol; the sync
+# still removes it; suspending first re-opens manual unenrol.
+# ---------------------------------------------------------------------------
+
+def test_cohort_active_unenrol_blocked():
+    async def scenario():
+        c = await svc.create_cohort(db, "scratch-rcohort", "SCRATCH-RC")
+        cid = c["cohort"]["id"]
+        mid = None
+        try:
+            mid = (await svc.create_method(
+                db, LAB1, "cohort", cohort_id=cid,
+                default_role_id=STUDENT_ROLE))["method"]["id"]
+            await db.fetch_all(
+                "insert into cohort_member (cohort_id, user_id) values ($1,$2) "
+                "returning user_id", cid, ALICE)
+            await svc.sync_cohort_method(db, mid, actor_id=ADMIN)
+            assert await svc.is_active_enrolled(db, ALICE, LAB1)
+
+            # manual unenrol of the ACTIVE cohort path is refused (409/ENR-013)
+            res = await svc.unenrol_user(db, mid, ALICE, actor_id=ADMIN)
+            assert res["ok"] is False and res["http_status"] == 409
+            assert await svc.is_active_enrolled(db, ALICE, LAB1), \
+                "refused unenrol must not have removed the row"
+
+            # suspend first → manual unenrol now allowed
+            await svc.suspend(db, mid, ALICE)
+            res = await svc.unenrol_user(db, mid, ALICE, actor_id=ADMIN)
+            assert res["ok"] is True
+            assert not await svc.is_enrolled(db, ALICE, LAB1)
+        finally:
+            await _cleanup_scratch(method_ids=[mid] if mid else [],
+                                   cohort_ids=[cid])
+    run(scenario())
+
+
+def test_delete_cohort_method_with_active_members():
+    """Regression (C2 R-COHORT vs delete_method): tearing down a cohort method
+    that has ACTIVE members must fully clean up — the guard bypass in
+    delete_method means enrolment rows, provenance role rows AND group
+    memberships all go, leaving no ghost course access. Without the bypass the
+    ON DELETE CASCADE removed the enrolment rows while every unenrol was
+    refused, orphaning the role_assignment rows."""
+    async def scenario():
+        c = await svc.create_cohort(db, "scratch-delcohort", "SCRATCH-DC")
+        cid = c["cohort"]["id"]
+        mid = None
+        try:
+            mid = (await svc.create_method(
+                db, LAB1, "cohort", cohort_id=cid,
+                default_role_id=STUDENT_ROLE))["method"]["id"]
+            await db.fetch_all(
+                "insert into cohort_member (cohort_id, user_id) values ($1,$2) "
+                "returning user_id", cid, ALICE)
+            await svc.sync_cohort_method(db, mid, actor_id=ADMIN)
+            assert await svc.is_active_enrolled(db, ALICE, LAB1)
+            # provenance role row exists before teardown
+            assert await db.fetch_one(
+                "select 1 from role_assignment where user_id=$1 "
+                "and component='enrol_cohort' and item_id=$2", ALICE, mid)
+
+            res = await svc.delete_method(db, mid, actor_id=ADMIN)
+            assert res["ok"] and ALICE in res["unenrolled"]
+            mid_deleted, mid = mid, None
+            # no ghost: enrolment gone, role_assignment gone, method gone
+            assert not await svc.is_enrolled(db, ALICE, LAB1)
+            assert await db.fetch_all(
+                "select 1 from role_assignment where user_id=$1 "
+                "and component='enrol_cohort' and item_id=$2",
+                ALICE, mid_deleted) == [], "ghost cohort role left behind"
+        finally:
+            await _cleanup_scratch(method_ids=[mid] if mid else [],
+                                   cohort_ids=[cid])
+    run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# T2-ENR-005 — per-path unenrol keeps a DIFFERENT role justified by another path
+# ---------------------------------------------------------------------------
+
+def test_perpath_unenrol_keeps_role_from_other_path():
+    """manual-teacher + cohort-student on one course. Unenrol the manual path →
+    the teacher role (its provenance) is removed, but the cohort-granted
+    student role and enrolment survive (§16 R-ROLE / T2-ENR-005)."""
+    async def scenario():
+        teacher_role = (await db.fetch_one(
+            "select id from role where short_name = 'editingteacher'"))["id"]
+        c = await svc.create_cohort(db, "scratch-perpath", "SCRATCH-PP")
+        cid = c["cohort"]["id"]
+        m_manual = m_cohort = None
+        try:
+            m_manual = await _make_method(default_role_id=teacher_role)
+            m_cohort = (await svc.create_method(
+                db, LAB1, "cohort", cohort_id=cid,
+                default_role_id=STUDENT_ROLE))["method"]["id"]
+            await db.fetch_all(
+                "insert into cohort_member (cohort_id, user_id) values ($1,$2) "
+                "returning user_id", cid, ALICE)
+            await svc.sync_cohort_method(db, m_cohort, actor_id=ADMIN)
+            await svc.enrol_user(db, m_manual, ALICE, role_id=teacher_role,
+                                 actor_id=ADMIN)
+
+            # unenrol ONLY the manual path
+            res = await svc.unenrol_user(db, m_manual, ALICE, actor_id=ADMIN)
+            assert res["ok"] and not res["last_path_cleanup"]
+            rows = {(r["component"], r["role_id"]) for r in await db.fetch_all(
+                "select component, role_id from role_assignment where user_id=$1",
+                ALICE)}
+            assert ("enrol_manual", teacher_role) not in rows, \
+                "manual teacher provenance should be gone"
+            assert ("enrol_cohort", STUDENT_ROLE) in rows, \
+                "cohort student role must survive the manual unenrol"
+            assert await svc.is_active_enrolled(db, ALICE, LAB1), \
+                "still enrolled via the cohort path"
+        finally:
+            await _cleanup_scratch(
+                method_ids=[x for x in (m_manual, m_cohort) if x],
+                cohort_ids=[cid])
     run(scenario())
 
 
