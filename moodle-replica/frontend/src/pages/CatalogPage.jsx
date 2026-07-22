@@ -234,6 +234,9 @@ export default function CatalogPage() {
       .catch((e) => setError(e));
   }
   useEffect(load, [actingUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ponytail: pooled Postgres reads can trail a just-committed write by a
+  // beat — refetch after a breath instead of instantly (retry loop if it recurs)
+  const reloadSoon = () => { setTimeout(load, 450); setTimeout(load, 1600); };
 
   if (!actingUser) return null;
   if (openCourse)
@@ -243,7 +246,7 @@ export default function CatalogPage() {
         userId={actingUser.id}
         onBack={() => {
           setOpenCourse(null);
-          load();
+          reloadSoon();
         }}
       />
     );
@@ -310,7 +313,7 @@ export default function CatalogPage() {
           <div key={r.course.id} className="card">
             <div className="card__title">{r.course.short_name}</div>
             <div>{r.course.full_name}</div>
-            <EnrolActions row={r} userId={actingUser.id} onChanged={load} />
+            <EnrolActions row={r} userId={actingUser.id} onChanged={reloadSoon} />
           </div>
         ))}
       </div>

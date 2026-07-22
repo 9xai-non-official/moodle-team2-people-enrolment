@@ -39,6 +39,7 @@ function RosterTab({ course, actorId, onNavigate }) {
     apiGet("/api/roles/contexts").then(setContexts).catch(() => {});
     apiGet("/api/users").then(setAllUsers).catch(() => {});
   }
+  const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
   useEffect(load, [course.id, actorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const courseCtx = contexts.find((c) => c.level === "course" && c.instance_id === course.id);
@@ -49,7 +50,7 @@ function RosterTab({ course, actorId, onNavigate }) {
     setError(null);
     try {
       await apiPost(`/api/lms/enrol-requests/${req.id}/${verb}`, { actor_id: actorId });
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -65,7 +66,7 @@ function RosterTab({ course, actorId, onNavigate }) {
       });
       setEnrolOpen(false);
       setEnrolUserId("");
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -79,7 +80,7 @@ function RosterTab({ course, actorId, onNavigate }) {
       } else {
         await apiPatch(`/api/lms/enrolments/${p.enrolment_id}`, { actor_id: actorId, status: action });
       }
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -93,7 +94,7 @@ function RosterTab({ course, actorId, onNavigate }) {
         user_id: userId,
         role_id: 3,
       });
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -111,7 +112,7 @@ function RosterTab({ course, actorId, onNavigate }) {
         context_id: courseCtx?.id,
       });
       setAssigning(null);
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -309,6 +310,7 @@ function ContentTab({ course, actorId, session }) {
   function load() {
     apiGet(`/api/lms/courses/${course.id}/activities?user_id=${actorId}`).then(setActivities).catch(() => {});
   }
+  const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
   useEffect(load, [course.id, actorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function create() {
@@ -331,7 +333,7 @@ function ContentTab({ course, actorId, session }) {
       setKind(null);
       setName("");
       setQuestions([EMPTY_Q()]);
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -376,7 +378,7 @@ function ContentTab({ course, actorId, session }) {
                       attempts_allowed: a.activity_type === "quiz" ? editAttempts : undefined,
                     });
                     setEditing(null);
-                    load();
+                    reload();
                   } catch (e) {
                     setError(e);
                   }
@@ -417,7 +419,7 @@ function ContentTab({ course, actorId, session }) {
                     setError(null);
                     try {
                       await apiPatch(`/api/lms/activities/${a.id}`, { actor_id: actorId, visible: !a.visible });
-                      load();
+                      reload();
                     } catch (e) {
                       setError(e);
                     }
@@ -584,7 +586,7 @@ function GradingTab({ course, actorId }) {
         grade: g.grade,
         feedback: g.feedback ?? "",
       });
-      open(activity);
+      setTimeout(() => open(activity), 450);
     } catch (e) {
       setError(e);
     }
@@ -599,7 +601,7 @@ function GradingTab({ course, actorId }) {
         question_id: questionId,
         points: g.points,
       });
-      open(activity);
+      setTimeout(() => open(activity), 450);
     } catch (e) {
       setError(e);
     }
@@ -674,7 +676,7 @@ function GradingTab({ course, actorId }) {
                     setError(null);
                     try {
                       await apiPost(`/api/lms/submissions/${s.id}/revert`, { actor_id: actorId });
-                      open(activity);
+                      setTimeout(() => open(activity), 450);
                     } catch (e) {
                       setError(e);
                     }
@@ -749,6 +751,7 @@ function NewCourseTab({ actorId, isAdmin }) {
   function load() {
     apiGet(`/api/lms/course-requests?actor_id=${actorId}`).then(setRequests).catch(() => {});
   }
+  const reload = () => { setTimeout(load, 450); setTimeout(load, 1600); }; // pooled reads trail fresh writes — double-tap
   useEffect(load, [actorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function tryCreate() {
@@ -756,7 +759,7 @@ function NewCourseTab({ actorId, isAdmin }) {
     setCreated(null);
     try {
       setCreated(await apiPost("/api/lms/courses", { actor_id: actorId, ...form }));
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -766,7 +769,7 @@ function NewCourseTab({ actorId, isAdmin }) {
     try {
       await apiPost("/api/lms/course-requests", { actor_id: actorId, ...form });
       setForm({});
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }
@@ -775,7 +778,7 @@ function NewCourseTab({ actorId, isAdmin }) {
     setError(null);
     try {
       await apiPost(`/api/lms/course-requests/${r.id}/${verb}`, { actor_id: actorId });
-      load();
+      reload();
     } catch (e) {
       setError(e);
     }

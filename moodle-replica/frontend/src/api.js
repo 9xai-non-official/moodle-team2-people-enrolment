@@ -16,6 +16,13 @@ export function setApiActingUser(id) {
   actingUserId = id;
 }
 
+// Bearer token from a real sign-in — hardened routers (roles/permissions)
+// authenticate with this; X-Acting-User stays for the interim ones.
+let authToken = null;
+export function setApiAuthToken(token) {
+  authToken = token || null;
+}
+
 // Global activity + write signals: the shell renders a thin top progress bar
 // while anything is in flight and a toast after successful writes — zero
 // per-component wiring, so no fetch can feel like a hang and no save can go
@@ -48,6 +55,7 @@ async function request(method, path, body) {
     const headers = {};
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (actingUserId != null) headers["X-Acting-User"] = String(actingUserId);
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers,
