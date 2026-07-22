@@ -219,8 +219,15 @@ async def run(c):
         "select r.short_name from role_capability rc join role r on r.id=rc.role_id "
         "join context ct on ct.id=rc.context_id "
         "where rc.capability='site:accessallgroups' and ct.level='system' order by 1")]
-    check("D-SEED: accessallgroups is editingteacher + manager only",
-          allgroups == ["editingteacher", "manager"], f"{allgroups}")
+    # 'teacher-allgroups' is a DELIBERATE fixture role (fixtures.sql:25-28) —
+    # a duplicate TA that keeps accessallgroups, so the demo can contrast it
+    # against a properly group-scoped TA. It is allowed here; plain 'teacher'
+    # is the one that must not have it (T2-RBAC-004). Matches the whitelist in
+    # apply.py's post-fixture contradiction check.
+    check("D-SEED: plain teacher no longer has accessallgroups",
+          "teacher" not in allgroups, f"{allgroups}")
+    check("D-SEED: accessallgroups limited to editingteacher/manager (+demo role)",
+          set(allgroups) <= {"editingteacher", "manager", "teacher-allgroups"}, f"{allgroups}")
     check("D-SEED: guest PROHIBIT on activity:submit preserved",
           await c.fetchval(
               "select permission='prohibit' from role_capability rc "
