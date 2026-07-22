@@ -52,7 +52,16 @@ const enrolledUserIds = (courseId) => [
 
 const buildParticipant = (userId, courseId) => {
   const user = userById(userId);
-  const paths = pathsOfUserInCourse(userId, courseId).map(({ e, m }) => ({
+  const rawPaths = pathsOfUserInCourse(userId, courseId); // {e, m}
+  const now = new Date("2026-07-21"); // matches the seed's frozen clock
+  // PathOut liveness = the four §6.2 conditions (status active + method enabled
+  // + window open). Account suspension is a SEPARATE axis and never folds into
+  // per-path `live` — mirrors the backend's ACTIVE_CONDITIONS_SQL exactly.
+  const windowOk = (e) =>
+    !(e.time_start && new Date(e.time_start) > now) &&
+    !(e.time_end && new Date(e.time_end) <= now);
+  const livePath = (e, m) => e.status === "active" && m.status === "enabled" && windowOk(e);
+  const paths = rawPaths.map(({ e, m }) => ({
     enrolment_id: e.id,
     method_id: m.id,
     method: m.method,
@@ -60,16 +69,31 @@ const buildParticipant = (userId, courseId) => {
     status: e.status,
     time_start: e.time_start,
     time_end: e.time_end,
+    live: livePath(e, m), // required on backend PathOut
+    window_ok: windowOk(e),
   }));
   const la = LAST_ACCESS.find(
     (a) => a.user_id === userId && a.course_id === courseId,
   );
+  // Two SEPARATE axes, matching the backend ParticipantOut (C-6): the enrolment
+  // status ignores account suspension; account_suspended is its own flag; and
+  // effective_status folds them for a single-badge fallback.
+  let enrolment_status;
+  if (rawPaths.some(({ e, m }) => livePath(e, m))) enrolment_status = "active";
+  else if (rawPaths.some(({ e }) => e.time_end && new Date(e.time_end) <= now))
+    enrolment_status = "expired";
+  else if (rawPaths.some(({ m }) => m.status === "disabled"))
+    enrolment_status = "method_disabled";
+  else enrolment_status = "suspended";
+
   return {
     user_id: userId,
     full_name: user?.full_name,
     username: user?.username,
     roles: rolesOfUserAtCourse(userId, courseId),
     paths,
+    enrolment_status,
+    account_suspended: !!user?.suspended,
     effective_status: effectiveStatus(userId, courseId),
     groups: groupsOfUser(userId, courseId).map((g) => ({ id: g.id, name: g.name })),
     last_access: la ? la.accessed_at : null,
@@ -85,9 +109,28 @@ const mapMethod = (mm) => {
     status: mm.status,
     default_role: r ? { id: r.id, short_name: r.short_name } : null,
     cohort: c ? { id: c.id, name: c.name } : null,
+    enrol_start: mm.enrol_start ?? null,
+    enrol_end: mm.enrol_end ?? null,
     config: mm.config,
     enrolled_count: ENROLMENTS.filter((e) => e.method_id === mm.id).length,
   };
+};
+
+// R-COHORT (ENR-013): a MANUAL unenrol of an ACTIVE cohort-synced path is
+// refused with 409 — the operator must suspend it first, or remove the user from
+// the cohort. The real service enforces this (services/enrolment.py); delete-
+// method and cohort-member-removal legitimately bypass it (they splice directly,
+// never through these handlers), matching the backend's _cohort_sync bypass.
+const guardCohortUnenrol = (enrolment) => {
+  const method = METHODS.find((mm) => mm.id === enrolment.method_id);
+  if (method && method.method === "cohort" && enrolment.status === "active") {
+    throw new ApiError(409, {
+      detail: "ENR-013: cannot unenrol an active cohort-synced path",
+      reasons: [
+        "This enrolment is synced from a cohort. Suspend it first, or remove the user from the cohort.",
+      ],
+    });
+  }
 };
 
 export const routes = [
@@ -157,6 +200,8 @@ export const routes = [
         status: b.status || "enabled",
         default_role_id: b.default_role_id ?? null,
         cohort_id: b.method === "cohort" ? b.cohort_id : null,
+        enrol_start: b.enrol_start ?? null,
+        enrol_end: b.enrol_end ?? null,
         config: b.config || {},
       };
       METHODS.push(created);
@@ -181,9 +226,11 @@ export const routes = [
       return {
         guest_access: guest.status === "enabled",
         method_id: guest.id,
-        has_password: !!guest.config?.password,
-        reason:
-          guest.status === "enabled" ? null : "guest method instance is disabled",
+        has_password: !!guest.config?.key, // backend reads config['key']
+        // Backend returns NO reason for a disabled-but-present guest method (only
+        // the no-method case carries a reason) — mirror that so the UI's
+        // disabled-vs-absent branch is driven by method_id, not by reason text.
+        reason: guest ? null : "no guest method instance in this course",
       };
     },
   },
@@ -193,7 +240,15 @@ export const routes = [
     handler: (m, body) => {
       const method = METHODS.find((mm) => mm.id === Number(m[1]));
       if (!method) throw new ApiError(404, { detail: "method not found" });
-      if (body?.status) method.status = body.status;
+      const b = body || {};
+      // Apply the MethodPatch fields the schema allows (only those provided).
+      if (b.status) method.status = b.status;
+      if (b.default_role_id !== undefined && b.default_role_id !== null)
+        method.default_role_id = b.default_role_id;
+      if (b.enrol_start !== undefined) method.enrol_start = b.enrol_start || null;
+      if (b.enrol_end !== undefined) method.enrol_end = b.enrol_end || null;
+      if (b.config !== undefined && b.config !== null)
+        method.config = { ...method.config, ...b.config };
       return mapMethod(method);
     },
   },
@@ -207,6 +262,16 @@ export const routes = [
           detail: "not a cohort method",
           reasons: ["Sync is only available on cohort enrolment methods."],
         });
+      // Disabled methods are frozen — the backend returns a skipped SyncResult
+      // rather than reconciling (services.sync_cohort_method).
+      if (method.status !== "enabled")
+        return {
+          added: [],
+          removed: [],
+          kept: [],
+          skipped: true,
+          reason: "method is disabled — sync skipped",
+        };
       const cohort = cohortById(method.cohort_id);
       const target = new Set(cohort ? cohort.member_ids : []);
       const current = ENROLMENTS.filter((e) => e.method_id === method.id);
@@ -234,7 +299,7 @@ export const routes = [
           time_end: null,
         });
       }
-      return { added, removed, kept };
+      return { added, removed, kept, skipped: false, reason: null };
     },
   },
   {
@@ -270,26 +335,28 @@ export const routes = [
           detail: "no enrolment method",
           reasons: ["This course has no matching enrolment method."],
         });
-      // one row per (user, method) — refuse a duplicate path (surfaces reasons).
-      if (
-        ENROLMENTS.some(
-          (e) => e.method_id === method.id && e.user_id === b.user_id,
-        )
-      )
-        throw new ApiError(409, {
-          detail: "already enrolled",
-          reasons: [
-            `${userById(b.user_id)?.full_name} already has an enrolment via the ${method.method} method.`,
-          ],
+      // T2-ENR-002 status-preserving re-enrol: re-enrolling an existing (user,
+      // method) row does NOT reactivate a suspended learner unless activate=true;
+      // only supplied time fields are written (undefined = "leave it"). A brand-
+      // new row is always active. Mirrors services.enrol_user's ON CONFLICT — the
+      // old mock hard-409'd, which contradicted the real contract.
+      const existing = ENROLMENTS.find(
+        (e) => e.method_id === method.id && e.user_id === b.user_id,
+      );
+      if (existing) {
+        if (b.activate) existing.status = "active";
+        if (b.time_start !== undefined) existing.time_start = b.time_start || null;
+        if (b.time_end !== undefined) existing.time_end = b.time_end || null;
+      } else {
+        ENROLMENTS.push({
+          id: nextEnrolmentId(),
+          method_id: method.id,
+          user_id: b.user_id,
+          status: "active",
+          time_start: b.time_start || null,
+          time_end: b.time_end || null,
         });
-      ENROLMENTS.push({
-        id: nextEnrolmentId(),
-        method_id: method.id,
-        user_id: b.user_id,
-        status: "active",
-        time_start: b.time_start || null,
-        time_end: b.time_end || null,
-      });
+      }
       // assign the chosen role at course context so the Roles column populates.
       const ctx = contextForCourse(courseId);
       const roleId = b.role_id || method.default_role_id;
@@ -334,8 +401,16 @@ export const routes = [
     method: "DELETE",
     pattern: /^\/api\/enrolment\/enrolments\/(\d+)$/,
     handler: (m) => {
-      const i = ENROLMENTS.findIndex((x) => x.id === Number(m[1]));
-      if (i >= 0) ENROLMENTS.splice(i, 1);
+      const e = ENROLMENTS.find((x) => x.id === Number(m[1]));
+      if (!e) throw new ApiError(404, { detail: `enrolment row ${m[1]} not found` });
+      guardCohortUnenrol(e); // R-COHORT 409 if active cohort-synced
+      const method = METHODS.find((mm) => mm.id === e.method_id);
+      ENROLMENTS.splice(ENROLMENTS.indexOf(e), 1);
+      // drop this path's provenance role rows (HC-2: completion rows untouched)
+      if (method)
+        for (let r = ROLE_ASSIGNMENTS.length - 1; r >= 0; r--)
+          if (ROLE_ASSIGNMENTS[r].user_id === e.user_id && ROLE_ASSIGNMENTS[r].item_id === method.id)
+            ROLE_ASSIGNMENTS.splice(r, 1);
       return null; // 204
     },
   },
@@ -355,6 +430,7 @@ export const routes = [
         throw new ApiError(404, {
           detail: `user ${userId} has no enrolment via method ${methodId}`,
         });
+      guardCohortUnenrol(ENROLMENTS[i]); // R-COHORT 409 if active cohort-synced
       ENROLMENTS.splice(i, 1);
       for (let r = ROLE_ASSIGNMENTS.length - 1; r >= 0; r--) {
         const ra = ROLE_ASSIGNMENTS[r];
@@ -395,47 +471,66 @@ export const routes = [
       const method = METHODS.find(
         (mm) => mm.course_id === courseId && mm.method === "self",
       );
+      const now = new Date("2026-07-21");
       const alreadyEnrolled = ENROLMENTS.some(
         (e) =>
           e.user_id === b.user_id &&
           METHODS.find((mm) => mm.id === e.method_id)?.course_id === courseId,
       );
-      const keyMatches = !!method && (method.config.key || "") === (b.key || "");
-      // Evaluate ALL gates (no stop-at-first-fail); enrolled = every gate passed.
-      const gates = [
-        {
-          gate: "method_enabled",
-          passed: !!method && method.status === "enabled",
-          reason: !method
+      const methodEnabled = !!method && method.status === "enabled";
+      const windowOpen =
+        methodEnabled &&
+        !(method.enrol_start && new Date(method.enrol_start) > now) &&
+        !(method.enrol_end && new Date(method.enrol_end) <= now);
+      const cap = method?.config?.max_enrolled;
+      const currentCount = method
+        ? ENROLMENTS.filter((e) => e.method_id === method.id).length
+        : 0;
+      const capacityOk = !cap || alreadyEnrolled || currentCount < Number(cap);
+      const keyMatches = methodEnabled && (method.config.key || "") === (b.key || "");
+      // Faithful gate CHAIN: the backend evaluates gates in order and returns the
+      // chain up to AND INCLUDING the first failure, naming it in failing_gate
+      // (schemas SelfEnrolVerdict). Gate names are the closed GateOut literal set
+      // (course_visible|method_enabled|window_open|capacity|key_match) — the old
+      // mock emitted "not_already_enrolled", which is NOT a real backend gate.
+      const chain = [
+        ["course_visible", true, "Course is visible."],
+        [
+          "method_enabled",
+          methodEnabled,
+          !method
             ? "No self-enrolment method on this course."
-            : method.status === "enabled"
+            : methodEnabled
               ? "Self enrolment is enabled."
               : "Self enrolment method is disabled.",
-        },
-        { gate: "window_open", passed: true, reason: "Enrolment period is open." },
-        {
-          gate: "key_match",
-          passed: keyMatches,
-          reason: !method
-            ? "No method to match a key against."
-            : keyMatches
-              ? "Enrolment key matches."
-              : "Enrolment key does not match.",
-        },
-        {
-          gate: "not_already_enrolled",
-          passed: !alreadyEnrolled,
-          reason: alreadyEnrolled
-            ? "User is already enrolled in this course."
-            : "User is not yet enrolled.",
-        },
-        { gate: "capacity", passed: true, reason: "Capacity available." },
+        ],
+        [
+          "window_open",
+          windowOpen,
+          windowOpen ? "Enrolment period is open." : "Enrolment period is closed.",
+        ],
+        ["capacity", capacityOk, capacityOk ? "Capacity available." : "This method is full."],
+        [
+          "key_match",
+          keyMatches,
+          keyMatches ? "Enrolment key matches." : "Wrong or missing enrolment key.",
+        ],
       ];
-      const enrolled = gates.every((g) => g.passed);
-      const blocking_reasons = gates
-        .filter((g) => !g.passed)
-        .map((g) => g.reason);
-      if (enrolled && method) {
+      const gates = [];
+      let failing_gate = null;
+      for (const [gate, passed, reason] of chain) {
+        gates.push({ gate, passed, reason });
+        if (!passed) {
+          failing_gate = gate;
+          break;
+        }
+      }
+      const enrolled = failing_gate === null;
+      const blocking_reasons = failing_gate
+        ? [`${failing_gate}: ${gates[gates.length - 1].reason}`]
+        : [];
+      // Backend does a status-preserving upsert, so re-self-enrol never dupes.
+      if (enrolled && method && !alreadyEnrolled) {
         ENROLMENTS.push({
           id: nextEnrolmentId(),
           method_id: method.id,
@@ -455,7 +550,14 @@ export const routes = [
             item_id: method.id,
           });
       }
-      return { enrolled, gates, blocking_reasons };
+      // method_id omitted when there is no method (response_model_exclude_none).
+      return {
+        enrolled,
+        failing_gate,
+        gates,
+        blocking_reasons,
+        ...(method ? { method_id: method.id } : {}),
+      };
     },
   },
   {
@@ -475,7 +577,6 @@ export const routes = [
                 deleted: course.deleted,
               }
             : null,
-          enrolment_id: e.id,
           method_id: e.method_id,
           method: method?.method,
           method_status: method?.status,
@@ -523,15 +624,21 @@ export const routes = [
         id: nextCohortId(),
         name: b.name,
         id_number: b.id_number || null,
+        description: b.description || "",
         member_ids: [],
       };
       COHORTS.push(created);
+      // Backend POST /cohorts returns {ok, cohort:<row>} (services.create_cohort)
+      // — a raw cohort row, NOT a flat CohortOut. The row carries description but
+      // no member_count/synced_courses (those come from the list endpoint).
       return {
-        id: created.id,
-        name: created.name,
-        id_number: created.id_number,
-        member_count: 0,
-        synced_courses: [],
+        ok: true,
+        cohort: {
+          id: created.id,
+          name: created.name,
+          id_number: created.id_number,
+          description: created.description,
+        },
       };
     },
   },
@@ -550,11 +657,10 @@ export const routes = [
       // is how salma gets her HC-1 second path.
       const synced = [];
       for (const method of METHODS.filter((mm) => mm.cohort_id === cohort.id)) {
-        if (
-          !ENROLMENTS.some(
-            (e) => e.method_id === method.id && e.user_id === b.user_id,
-          )
-        )
+        const wasEnrolled = ENROLMENTS.some(
+          (e) => e.method_id === method.id && e.user_id === b.user_id,
+        );
+        if (!wasEnrolled)
           ENROLMENTS.push({
             id: nextEnrolmentId(),
             method_id: method.id,
@@ -582,10 +688,18 @@ export const routes = [
             component: "enrol_cohort",
             item_id: method.id,
           });
-        const short = courseById(method.course_id)?.short_name;
-        if (short && !synced.includes(short)) synced.push(short);
+        // Per-method sync entry, matching the backend's {method_id, ok, added,
+        // removed, kept} shape (services.sync_methods_for_cohort) — NOT a flat
+        // list of course names. added/kept carry user ids.
+        synced.push({
+          method_id: method.id,
+          ok: true,
+          added: wasEnrolled ? [] : [b.user_id],
+          removed: [],
+          kept: wasEnrolled ? [b.user_id] : [],
+        });
       }
-      return { added: [b.user_id], synced_courses: synced };
+      return { ok: true, synced };
     },
   },
   {
