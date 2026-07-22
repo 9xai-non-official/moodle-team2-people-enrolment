@@ -50,6 +50,7 @@ async def _me_summary(user: dict) -> dict:
           from role_assignment ra
           join role r on r.id = ra.role_id
           join context c on c.id = ra.context_id
+          join course co on co.id = c.instance_id and co.deleted_at is null
          where ra.user_id = $1 and c.level = 'course'
            and r.archetype in ('editingteacher','teacher')
         """, uid)
