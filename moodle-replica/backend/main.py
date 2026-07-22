@@ -29,7 +29,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow the Vite dev server (localhost:5173) to call this API during development.
+# Allow the Vite dev server (localhost:5173) during development, plus the
+# deployed frontend on Vercel (any *.vercel.app preview/prod of this team).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -39,6 +40,7 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5174",
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
