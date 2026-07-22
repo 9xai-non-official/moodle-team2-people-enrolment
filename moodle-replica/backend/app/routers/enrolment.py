@@ -129,10 +129,11 @@ async def create_method(course_id: int, body: MethodCreate,
 async def patch_method(method_id: int, body: MethodPatch,
                        principal: dict = Depends(current_user)):
     await _gate_method(principal, method_id, CAP_ENROL_CONFIG)
+    # exclude_unset so an ABSENT key and an explicit null are different
+    # requests: absent leaves the column alone, null clears it. Passing every
+    # field unconditionally is what made a set enrolment window unclearable.
     return _ok(await svc.update_method(
-        db, method_id, status=body.status,
-        default_role_id=body.default_role_id, enrol_start=body.enrol_start,
-        enrol_end=body.enrol_end, config=body.config), 404)
+        db, method_id, **body.model_dump(exclude_unset=True)), 404)
 
 
 @router.delete("/methods/{method_id}", status_code=204)
