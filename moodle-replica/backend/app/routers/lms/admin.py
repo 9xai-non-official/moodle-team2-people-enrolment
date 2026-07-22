@@ -33,6 +33,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app import db
 from app.deps import current_user
+from app.services import permissions
 
 router = APIRouter()
 
@@ -135,19 +136,31 @@ async def get_course(course_id: int,
 @router.post("/courses")
 async def create_course(body: dict = Body(default=None),
                         principal: dict = Depends(current_user)):
-    """Create a course directly — ADMIN only (moodle/course:create belongs to
-    Manager). Teachers must go through requests.py (POST /course-requests).
+    """Create a course directly. Gated on the course:create capability at the
+    SYSTEM context — a category/site-level power in Moodle — so Manager, Course
+    creator, and (this team's extension, T2-ROLES-001) a SITE-level editing
+    teacher may create courses, with the site-admin bypass intact. A
+    course-scoped editing teacher, a non-editing teacher, or a student is
+    refused (403) and should request a course instead (requests.py: approval
+    makes them its teacher).
 
     Writes ONLY the course row. The course-level *context* (permission spine)
     and default *enrolment methods* belong to other domains and are not written
     here; when the context is still absent the response says so."""
     body = body or {}
-    await _require_admin(
-        principal,
-        "teachers cannot create courses — moodle/course:create belongs to "
-        "Manager / Course creator; request a course instead (approval makes "
-        "you its teacher)",
-    )
+    # course:create lives at category/site level (there is only a system context
+    # here), so check it there. has_capability applies the site-admin bypass and
+    # returns False for an unknown capability, so this is fail-closed if M19 has
+    # not been applied.
+    sys_ctx = await db.fetch_val("select id from context where level = 'system'")
+    if sys_ctx is None or not await permissions.has_capability(
+            db, principal["id"], "course:create", sys_ctx):
+        raise HTTPException(
+            status_code=403,
+            detail="requires capability 'course:create' at the site level — it "
+            "belongs to Manager, Course creator, or a site-level editing teacher; "
+            "otherwise request a course instead (approval makes you its teacher)",
+        )
     full_name = (body.get("full_name") or "").strip()
     short_name = (body.get("short_name") or "").strip()
     if not full_name or not short_name:
