@@ -1,9 +1,10 @@
 """Database access — asyncpg pool over the team's Supabase Postgres.
 
 Task 03 bootstrap: the schema + seed already live in the Supabase project
-(see /schema.sql and /seed.sql at repo root). DATABASE_URL comes from
+(see /schema.sql at repo root and /db/seed.sql). DATABASE_URL comes from
 backend/.env (gitignored) — copy backend/.env.example and fill in the
-password from TEAM_CREDENTIALS.md.
+password from your own local TEAM_CREDENTIALS.md (gitignored; get it from a
+teammate over a private channel, never from version control).
 
 Use the session pooler (port 5432). The transaction pooler (6543) breaks
 asyncpg's prepared statements; statement_cache_size=0 is set anyway so
