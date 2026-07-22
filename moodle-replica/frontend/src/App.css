@@ -876,3 +876,67 @@ button.card--stat:hover {
   .panel--attention { background: #232a36; border-color: #8ab4f8; }
   .quiz-q { border-left-color: #33383d; }
 }
+
+/* ---- UX polish pass: identity chip, table calm, focus, motion ---------- */
+
+/* Header identity: who you are, worn like a badge */
+.id-chip {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.25rem 0.7rem 0.25rem 0.3rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+}
+.id-chip__avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #1a73e8, #6ea8f7);
+  color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.5px;
+}
+.id-chip__meta { display: flex; flex-direction: column; line-height: 1.15; }
+.id-chip__name { font-size: 0.85rem; font-weight: 600; }
+.id-chip__role { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.8px; opacity: 0.65; }
+
+/* Small buttons for dense table cells; actions whisper until the row is hovered */
+.btn--sm { padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+.cell-actions { opacity: 0.25; transition: opacity 120ms ease; margin-top: 0.2rem; }
+tr:hover .cell-actions, .cell-actions:focus-within { opacity: 1; }
+
+/* Tables: quiet zebra + sticky header for long rosters */
+.data-table tbody tr:nth-child(even) { background: #fafbfd; }
+.data-table tbody tr:hover { background: #f4f7ff; }
+.data-table thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+
+/* Cards lift a breath on hover — affordance without noise */
+.card--link { transition: box-shadow 140ms ease, transform 140ms ease; }
+.card--link:hover { box-shadow: 0 3px 12px rgba(26, 115, 232, 0.12); transform: translateY(-1px); }
+
+/* Sidebar: active page carries an accent bar, not just a tint */
+.nav-item { position: relative; transition: background 120ms ease; }
+.nav-item--active::before {
+  content: ""; position: absolute; left: -0.75rem; top: 20%; bottom: 20%;
+  width: 3px; border-radius: 2px; background: #1a73e8;
+}
+
+/* Tabs: underline eases in */
+.tab { transition: border-color 140ms ease, color 140ms ease; }
+
+/* Keyboard users get a visible ring everywhere */
+:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; border-radius: 4px; }
+
+/* Page content settles in on navigation */
+@media (prefers-reduced-motion: no-preference) {
+  .content > * { animation: settle 180ms ease-out; }
+  @keyframes settle {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .data-table tbody tr:nth-child(even) { background: #22262b; }
+  .data-table tbody tr:hover { background: #262c33; }
+  .data-table thead th { background: #1b1f24; }
+  .card--link:hover { box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4); }
+  .id-chip { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); }
+}

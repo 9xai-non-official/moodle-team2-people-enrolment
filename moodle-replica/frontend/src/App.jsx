@@ -179,8 +179,24 @@ function Shell() {
         {session.mode === "explore" ? (
           <ActingUserSelect />
         ) : (
-          <span className="acting-user" title="You act as yourself — sign out to switch people.">
-            👤 {session.user?.full_name}
+          <span className="id-chip" title="You act as yourself — sign out to switch people.">
+            <span className="id-chip__avatar" aria-hidden>
+              {(session.user?.full_name ?? "?")
+                .split(" ")
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join("")}
+            </span>
+            <span className="id-chip__meta">
+              <span className="id-chip__name">{session.user?.full_name}</span>
+              <span className="id-chip__role">
+                {session.is_admin
+                  ? "manager"
+                  : session.teaches?.length
+                    ? "teacher"
+                    : "student"}
+              </span>
+            </span>
           </span>
         )}
         <button className="btn help-btn" title={session.mode === "explore" ? "Leave explore mode" : "Sign out"} onClick={signOut}>
