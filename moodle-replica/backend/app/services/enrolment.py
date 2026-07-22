@@ -145,6 +145,74 @@ async def _method(dbx, method_id: int) -> dict | None:
     return await _one(dbx, "select * from enrolment_method where id = $1", method_id)
 
 
+# ---------------------------------------------------------------------------
+# Audit (D-AUDIT / T2-DATA-001) — ONE sink for this domain: append to audit_log.
+# The fixed columns (event, actor_id, affected_id, course_id, context_id) map
+# 1:1; every extended field (method_id, method kind, previous/new status,
+# last_path, expiry action, intended group op, provenance, failure reason,
+# reconciliation status) rides in `detail` jsonb. The M10 assessment froze the
+# audit_log shape as ADEQUATE, so nothing here needs a schema change.
+#
+# Placement rule (RETURN §"Transaction placement"): pass the TRANSACTION
+# connection so the audit row shares the mutation's commit/rollback — an atomic
+# lifecycle record. Only genuinely post-commit effects (deferred group
+# side-effects, which run on Mahmoud's own connections after our tx closes) are
+# audited on the module db, best-effort.
+# ---------------------------------------------------------------------------
+async def _audit(dbx, event, actor=None, affected=None, course=None,
+                 context=None, detail=None):
+    """Insert one audit_log row on `dbx`. When `dbx` is the transaction conn the
+    write is atomic with the mutation (it raises on failure so the mutation
+    rolls back with it); post-commit callers pass the module db and wrap this
+    best-effort."""
+    await _one(dbx, """
+        insert into audit_log
+            (event, actor_id, affected_id, course_id, context_id, detail)
+        values ($1, $2, $3, $4, $5, $6::jsonb)
+        returning id
+    """, event, actor, affected, course, context, json.dumps(detail or {}))
+
+
+def _group_op_affected(fn: str, args: tuple):
+    """The affected user id carried by a deferred group op, if any."""
+    if fn == "add_member" and len(args) >= 2:
+        return args[1]                       # (group_id, user_id, ...)
+    if fn in ("remove_members_by_provenance", "remove_all_memberships") and len(args) >= 2:
+        return args[1]                       # (course_id, user_id, ...)
+    return None
+
+
+async def _audit_group_ops(dbx, ops: list, results: list, *, actor=None,
+                           course=None, context=None) -> None:
+    """POST-COMMIT: record every deferred group side-effect that did not succeed
+    so it can be diagnosed and reconciled (Engineer 2's deferred-op flow). It
+    consumes whatever the groups service — or the not-merged-yet guard — returned
+    (ok / skipped / reason) and never lets an audit failure break the request:
+    the mutation has already committed and cannot be rolled back here."""
+    for (fn, args, kwargs), res in zip(ops, results):
+        res = res or {}
+        if res.get("ok"):
+            continue                          # succeeded — nothing to reconcile
+        skipped = bool(res.get("skipped"))
+        detail = {
+            "intended_group_op": fn,
+            "op_args": list(args),
+            "op_kwargs": kwargs,
+            "provenance": kwargs.get("component"),
+            "failure_reason": res.get("reason"),
+            "skipped": skipped,
+            # skipped = the op never ran (groups service unavailable) → replay
+            # when it lands; a hard failure needs manual repair.
+            "reconciliation": "pending" if skipped else "needs_repair",
+            "result": res,
+        }
+        try:
+            await _audit(dbx, "enrolment.group_op_failed", actor,
+                         _group_op_affected(fn, args), course, context, detail)
+        except Exception:  # pragma: no cover - audit is best-effort post-commit
+            log.exception("group-op audit write failed for %s%s", fn, args)
+
+
 # ===========================================================================
 # The six frozen signatures (task 01 §3)
 #
@@ -230,6 +298,12 @@ async def enrol_user(db, method_id: int, user_id: int, *,
             return {"ok": False,
                     "reason": "guest methods never create enrolment rows (§6.7)"}
 
+        # Read prior state (read-only — no behaviour change) so audit can tell
+        # created from updated and record the previous status on re-enrol.
+        prev = await _one(conn,
+            "select status from enrolment where method_id = $1 and user_id = $2",
+            method_id, user_id)
+
         row = await _one(conn, """
             insert into enrolment (method_id, user_id, status, time_start,
                                    time_end, modified_by)
@@ -244,10 +318,13 @@ async def enrol_user(db, method_id: int, user_id: int, *,
         result = {"ok": True, "enrolment": row, "role_assigned": None,
                   "group_added": None, "warnings": []}
 
+        # Course context id — hoisted so both the provenance role row and the
+        # audit record use the one value (same as before, computed once).
+        ctx = await _course_context_id(conn, method["course_id"])
+
         # Provenance role row (§6.5, D-1: even manual carries component).
         effective_role = role_id or method["default_role_id"]
         if effective_role is not None:
-            ctx = await _course_context_id(conn, method["course_id"])
             if ctx is None:
                 result["warnings"].append(
                     f"no course context for course {method['course_id']} — "
@@ -272,9 +349,27 @@ async def enrol_user(db, method_id: int, user_id: int, *,
             ops.append(("add_member", (sync_group_id, user_id),
                         {"component": "enrol_cohort", "item_id": method_id}))
 
+        # --- audit, INSIDE the tx so it commits/rolls back with the enrolment.
+        await _audit(conn,
+                     "enrolment.created" if prev is None else "enrolment.updated",
+                     actor_id, user_id, method["course_id"], ctx, {
+                         "method_id": method_id, "method_kind": method["method"],
+                         "previous_status": (prev or {}).get("status"),
+                         "new_status": row["status"],
+                         "role_assigned": result["role_assigned"]})
+        assigned = result["role_assigned"]
+        if assigned and assigned["created"]:
+            await _audit(conn, "role.assigned", actor_id, user_id,
+                         method["course_id"], ctx, {
+                             "role_id": assigned["role_id"],
+                             "component": assigned["component"],
+                             "item_id": method_id, "provenance": "enrolment"})
+
     if _group_ops is None:                    # top-level call: tx committed here
         done = await _run_group_ops(ops)
         result["group_added"] = done[0] if done else None
+        await _audit_group_ops(db, ops, done, actor=actor_id,
+                               course=method["course_id"], context=ctx)
     elif ops:
         result["group_added"] = {"deferred": True}
     return result
@@ -347,11 +442,28 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             # rows (Hard Case #2), submissions, grades, and role_assignment
             # rows with component='' (Khaled's — never touch).
 
+        # --- audit, INSIDE the tx (atomic with the deletes). `last_path` records
+        # whether THIS was the final path (triggering whole-course cleanup);
+        # `removed_path` names the method/provenance that went.
+        await _audit(conn, "enrolment.deleted", actor_id, user_id, course_id, ctx, {
+            "method_id": method_id, "method_kind": method["method"],
+            "removed_path": {"method_id": method_id, "component": component},
+            "last_path": result["last_path_cleanup"],
+            "roles_removed": result["roles_removed"]})
+        if result["roles_removed"]:
+            await _audit(conn, "role.unassigned", actor_id, user_id, course_id, ctx, {
+                "roles_removed": result["roles_removed"],
+                "component": component, "item_id": method_id,
+                "provenance": "enrolment",
+                "included_last_path_leftovers": result["last_path_cleanup"]})
+
     if _group_ops is None:                    # top-level call: tx committed here
         done = await _run_group_ops(ops)
         result["groups_removed"] = done[0] if done else None
         if result["last_path_cleanup"] and len(done) > 1:
             result["all_memberships_removed"] = done[1]
+        await _audit_group_ops(db, ops, done, actor=actor_id,
+                               course=course_id, context=ctx)
     elif ops:
         result["groups_removed"] = {"deferred": True}
     return result
@@ -368,13 +480,33 @@ async def reactivate(db, method_id: int, user_id: int) -> dict:
 
 
 async def _set_status(db, method_id: int, user_id: int, status: str) -> dict:
-    row = await _one(db, """
-        update enrolment set status = $3, updated_at = now()
-         where method_id = $1 and user_id = $2
-        returning *
-    """, method_id, user_id, status)
-    if row is None:
-        return {"ok": False, "reason": "user is not enrolled via this method"}
+    event = "enrolment.suspended" if status == "suspended" else "enrolment.reactivated"
+    async with _tx(db) as conn:
+        # Prior status (read-only) distinguishes a real transition from a no-op.
+        # Behaviour is unchanged — the UPDATE still runs regardless (the service
+        # does not change-gate); only the AUDIT is skipped on a no-op, so a
+        # redundant suspend/reactivate never emits a false lifecycle event.
+        prev = await _one(conn,
+            "select status from enrolment where method_id = $1 and user_id = $2",
+            method_id, user_id)
+        row = await _one(conn, """
+            update enrolment set status = $3, updated_at = now()
+             where method_id = $1 and user_id = $2
+            returning *
+        """, method_id, user_id, status)
+        if row is None:
+            return {"ok": False, "reason": "user is not enrolled via this method"}
+        prev_status = prev["status"] if prev else None
+        if prev_status != status:               # skip audit on a true no-op
+            method = await _method(conn, method_id)
+            course_id = method["course_id"] if method else None
+            ctx = await _course_context_id(conn, course_id) if course_id else None
+            # actor: suspend()/reactivate() carry no actor_id in the frozen
+            # signature → documented system/unknown actor (None). See report.
+            await _audit(conn, event, None, user_id, course_id, ctx, {
+                "method_id": method_id,
+                "method_kind": method["method"] if method else None,
+                "previous_status": prev_status, "new_status": status})
     return {"ok": True, "enrolment": row}
 
 
@@ -473,6 +605,8 @@ async def self_enrol(db, course_id: int, user_id: int,
 
     # tx committed — group placement can now see the new enrolment row.
     done = await _run_group_ops(ops)
+    await _audit_group_ops(db, ops, done, actor=user_id, course=course_id,
+                           context=await _course_context_id(db, course_id))
     return verdict(enrolled=True, method_id=method["id"],
                    enrolment=result["enrolment"],
                    group_joined=done[-1] if matched_group else None)
@@ -528,8 +662,22 @@ async def sync_cohort_method(db, method_id: int, *,
                                _group_ops=ops)
             removed.append(uid)
 
+        # Per-member created/deleted/reactivated rows were already audited by the
+        # nested enrol_user/unenrol_user/reactivate calls above (in THIS tx). One
+        # summary row records the reconcile as a whole (§6.8), in-tx.
+        ctx = await _course_context_id(conn, method["course_id"])
+        await _audit(conn, "enrolment.synced", actor_id, None,
+                     method["course_id"], ctx, {
+                         "method_id": method_id, "method_kind": "cohort",
+                         "cohort_id": method["cohort_id"],
+                         "added": added, "removed": removed, "kept": kept,
+                         "counts": {"added": len(added), "removed": len(removed),
+                                    "kept": len(kept)}})
+
     # tx committed — run the accumulated group side-effects.
-    await _run_group_ops(ops)
+    done = await _run_group_ops(ops)
+    await _audit_group_ops(db, ops, done, actor=actor_id,
+                           course=method["course_id"], context=ctx)
     return {"ok": True, "added": added, "removed": removed, "kept": kept}
 
 
