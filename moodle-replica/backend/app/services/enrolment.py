@@ -36,7 +36,7 @@ from app import db as _dbmod
 
 log = logging.getLogger("enrolment")
 
-try:  # Mahmoud's groups service — frozen contract in tasks/assignments/05 §3.
+try:  # Mahmoud's groups service — frozen contract in tasks/day2-build-assignments/05 §3.
     from app.services import groups as _groups
 except ImportError:  # pragma: no cover
     _groups = None

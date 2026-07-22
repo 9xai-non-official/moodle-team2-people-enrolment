@@ -246,7 +246,7 @@ Reconcile frontend contract paths ↔ live routes so the `lib/*Api.js` fallback 
 | `moodle-team2-people-enrolment/migrations/` (new dir) | Forward-only migration home + `schema_migrations` ledger | all |
 | `migrations/M01…M16_*.sql` | The 16 migration units (§5) | all |
 | `moodle-team2-people-enrolment/schema.sql` | Regenerate "current full state" as migrations merge (source of change = migrations) | all |
-| `moodle-team2-people-enrolment/seed.sql`, `moodle-replica/backend/fixtures.sql` | D-SEED corrections; reconcile into one canonical seed | M09 |
+| `moodle-team2-people-enrolment/db/seed.sql`, `moodle-replica/backend/fixtures.sql` | D-SEED corrections; reconcile into one canonical seed | M09 |
 | `moodle-replica/backend/.env` | **Remove** from tree (D-SEC) | M00 |
 | `moodle-replica/backend/.gitignore` | Add `.env` | M00 |
 | `moodle-replica/backend/.env.example` | Keep placeholders; document secret-store loading | M00 |

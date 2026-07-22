@@ -114,7 +114,7 @@ let it through. Low priority, but if we hit strange SQL behaviour, look here fir
 Confirmed from `/Applications/MAMP/htdocs2/moodle503/config.php`. Still a per-install choice, so
 if we ever point at the organiser's shared instance, re-check it before trusting any query.
 
-### ✅ Q7 — How do we get at the database? → `./db.sh` (2026-07-20)
+### ✅ Q7 — How do we get at the database? → `./scripts/db.sh` (2026-07-20)
 
 MAMP puts MySQL on a non-standard port and buries the client. Recorded so nobody re-derives it:
 
@@ -127,7 +127,7 @@ MAMP puts MySQL on a non-standard port and buries the client. Recorded so nobody
 | Source tree | `/Applications/MAMP/htdocs2/moodle503/public` |
 | moodledata | `/Applications/MAMP/data/moodle503` |
 
-`./db.sh "SELECT ..."` wraps all of it and reads credentials from `config.php` at runtime,
+`./scripts/db.sh "SELECT ..."` wraps all of it and reads credentials from `config.php` at runtime,
 so no password is committed to this repo.
 
 **Baseline for later comparison** — the permission surface is **757 rows in `mdl_capabilities`**,

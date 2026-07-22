@@ -37,7 +37,7 @@ everyone can add rules here concurrently without ID collisions:
 
 | Prefix | Area | Owner | Source |
 |---|---|---|---|
-| `T2-GRP-XXX` | Groups, groupings, visibility, TA scope | Mahmoud | [tasks/03_mahmoud_groups_testing.md](tasks/03_mahmoud_groups_testing.md) |
+| `T2-GRP-XXX` | Groups, groupings, visibility, TA scope | Mahmoud | [tasks/day1-testing/03-mahmoud-groups.md](tasks/day1-testing/03-mahmoud-groups.md) |
 | `T2-ENR-XXX` | Enrolment methods | TBD | not yet received |
 | `T2-ROL-XXX` | Roles & capabilities / permission engine | TBD (likely Yaman, as anchor reviewer) | not yet received |
 | `T2-PRG-XXX` | Progress & completion | TBD | not yet received |

@@ -1,6 +1,6 @@
 # Why our DB beats Moodle's — and where it doesn't
 
-Team 2 — People & Enrolment. Defense of the schema in [`schema.sql`](schema.sql) / [`DB_SCHEMA.md`](DB_SCHEMA.md).
+Team 2 — People & Enrolment. Defense of the schema in [`schema.sql`](../../schema.sql) / [`DB_SCHEMA.md`](DB_SCHEMA.md).
 
 **Stack note (per brief):** everything we build is Python (FastAPI) + TypeScript (React) + PostgreSQL.
 PHP appears in this project only as *reading material* — Moodle's source is what we studied, never

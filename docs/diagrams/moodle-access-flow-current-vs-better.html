@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access decision flow — Moodle today vs a cleaner design</title>
+<style>
+  :root { --ink:#22262b; --mut:#6b7280; --line:#e3e1da; --card:#ffffff; --bg:#faf9f6; --blue:#1f3a76; --red:#7b241c; --green:#145a32; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:880px; margin:0 auto; padding:48px 24px 72px; }
+  h1 { font-size:27px; line-height:1.25; margin:0 0 6px; font-weight:650; letter-spacing:-0.01em; }
+  .sub { color:var(--mut); margin:0 0 40px; font-size:15px; }
+  h2 { font-size:19px; margin:44px 0 4px; font-weight:600; }
+  .cap { color:var(--mut); font-size:14px; margin:0 0 14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 12px; overflow-x:auto; }
+  pre.mermaid { margin:0; background:transparent; display:flex; justify-content:center; }
+  code { font-family:ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:0.88em; background:#f1efe9; border-radius:4px; padding:1px 5px; }
+  .delta { margin-top:10px; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+  .row { display:grid; grid-template-columns:190px 1fr; gap:14px; padding:14px 18px; border-top:1px solid var(--line); font-size:14.5px; }
+  .row:first-child { border-top:0; }
+  .row b { font-weight:600; color:var(--blue); }
+  .note { margin-top:36px; font-size:14px; color:var(--mut); border-left:3px solid var(--line); padding-left:14px; }
+  @media (max-width:620px){ .row{ grid-template-columns:1fr; gap:4px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Access decision flow — Moodle today vs a cleaner design</h1>
+  <p class="sub">Team 2 · people &amp; enrolment — the answer to "can user U do action A in course C, and why?"</p>
+
+  <h2>Today: one question, three gates, three codebases</h2>
+  <p class="cap">The decision is smeared across <code>require_login()</code>, <code>has_capability()</code> in accesslib, and group checks re-implemented inside every activity. No layer explains itself.</p>
+  <div class="card">
+  <pre class="mermaid">
+flowchart TD
+    Q["can user U do action A<br/>in course C?"] --> ADM{"site admin?"}
+    ADM -- "yes" --> BYP["full access<br/>bypasses the whole role system"]
+    ADM -- "no" --> G1["GATE 1 — require_login()<br/>the page-level door"]
+    G1 --> ENR{"active enrolment via ANY method?<br/>(row active · instance enabled · in time window)"}
+    ENR -- "yes" --> G2
+    ENR -- "no" --> GST{"guest access<br/>on this course?"}
+    GST -- "no" --> X1["blocked at the door —<br/>capability check never runs"]
+    GST -- "yes" --> G2["GATE 2 — has_capability()<br/>lib/accesslib.php"]
+    G2 --> COL["collect role assignments<br/>along the context path"]
+    COL --> RES["resolve each role —<br/>deepest override wins"]
+    RES --> PRO{"any role says<br/>PROHIBIT?"}
+    PRO -- "yes" --> X2["deny — absolute veto,<br/>crosses all roles"]
+    PRO -- "no" --> ALW{"any role says<br/>ALLOW?"}
+    ALW -- "no" --> X3["deny by default"]
+    ALW -- "yes" --> G3["GATE 3 — group mode,<br/>re-checked inside each activity"]
+    G3 --> GRP{"accessallgroups<br/>or shares a group?"}
+    GRP -- "no" --> X4["filtered by the activity UI —<br/>a curtain, not a wall"]
+    GRP -- "yes" --> OK["allowed —<br/>with zero explanation of why"]
+
+    classDef deny fill:#fdecea,stroke:#c0392b,color:#7b241c;
+    classDef ok fill:#e9f7ef,stroke:#1e8449,color:#145a32;
+    classDef gate fill:#edf1fb,stroke:#3d5aa9,color:#1f3a76;
+    classDef warn fill:#fdf3e3,stroke:#b9770e,color:#7e5109;
+    class X1,X2,X3,X4 deny;
+    class OK ok;
+    class BYP warn;
+    class G1,G2,G3 gate;
+  </pre>
+  </div>
+
+  <h2>Better: one engine, one verdict, one trace</h2>
+  <p class="cap">Every caller hits a single policy engine. Membership is an event log projected into "effective enrolment", the enrolment requirement is declared per action, and the explanation <em>is</em> the response.</p>
+  <div class="card">
+  <pre class="mermaid">
+flowchart TD
+    Q["can user U do action A<br/>on resource R?"] --> PE["policy engine — one entry point,<br/>every caller goes through here"]
+    EV[("append-only membership events<br/>enrolled · suspended · source-removed")] -.-> EFF
+    PE --> EFF["effective-enrolment projection<br/>one definition, computed in one place"]
+    EFF --> REQ{"action declares<br/>requires_active_enrolment?"}
+    REQ -- "yes, none active" --> X1["deny + trace:<br/>failed enrolment gate"]
+    REQ -- "pass" --> PM["match policies:<br/>principal · action · scope subtree<br/>· group scope · conditions"]
+    ADM["admins = break-glass policy,<br/>audited — not a bypass"] -.-> PM
+    PM --> DNY{"explicit DENY<br/>matched?"}
+    DNY -- "yes" --> X2["deny + trace:<br/>policy id and scope"]
+    DNY -- "no" --> ALW{"ALLOW at<br/>deepest scope?"}
+    ALW -- "no" --> X3["deny by default<br/>+ trace"]
+    ALW -- "yes" --> OK["allow + full decision trace —<br/>the 'why' IS the API response"]
+    OK --> TS["outcome events → learner transcript,<br/>owned by the user, survives course deletion"]
+
+    classDef deny fill:#fdecea,stroke:#c0392b,color:#7b241c;
+    classDef ok fill:#e9f7ef,stroke:#1e8449,color:#145a32;
+    classDef gate fill:#edf1fb,stroke:#3d5aa9,color:#1f3a76;
+    classDef store fill:#f4f2ec,stroke:#9aa0a6,color:#3c4043;
+    class X1,X2,X3 deny;
+    class OK,TS ok;
+    class PE,EFF,PM gate;
+    class EV,ADM store;
+  </pre>
+  </div>
+
+  <h2>What changed, and which hard case it kills</h2>
+  <div class="delta">
+    <div class="row"><b>One entry point</b><span>Three scattered gates collapse into a single engine — exactly one place where a decision can be made, logged, or audited.</span></div>
+    <div class="row"><b>Declared enrolment gate</b><span>Each action states <code>requires_active_enrolment</code> instead of depending on which PHP function happened to run first. The hidden <code>require_login</code>/<code>has_capability</code> split becomes explicit.</span></div>
+    <div class="row"><b>One DENY, two rules</b><span>Prevent/Prohibit folklore is replaced by explicit-deny-beats-allow and deeper-scope-beats-shallower. Same expressive power, published precedence, no trap.</span></div>
+    <div class="row"><b>Native group scope</b><span>"Grader in course C, for group A" is one policy row. Hard case 3 stops being a fragile three-mechanism hack.</span></div>
+    <div class="row"><b>Events, not deletions</b><span>Membership is append-only and outcomes flow to a user-owned transcript. Hard case 2 becomes a replay, hard case 5 becomes possible at all.</span></div>
+    <div class="row"><b>Audited break-glass</b><span>Admin power is a policy like any other — logged and revocable — instead of a config-file bypass around the entire model.</span></div>
+  </div>
+
+  <p class="note">Both charts are the simplified spine — verify every edge empirically (DB diff before/after, Check permissions as oracle) before it enters the rules catalogue. Left chart seeds <code>how-moodle-works.md</code>; right chart seeds <code>my-design.md</code>.</p>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "neutral",
+    securityLevel: "loose",
+    flowchart: { htmlLabels: true, curve: "basis" },
+    themeVariables: { fontFamily: "ui-sans-serif, system-ui, sans-serif", fontSize: "14px" }
+  });
+</script>
+</body>
+</html>
