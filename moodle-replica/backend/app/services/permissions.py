@@ -21,6 +21,7 @@ findings docs. Key rules:
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -440,28 +441,14 @@ def _parse_path(path_str: str) -> list[int]:
     return ids
 
 
-# The context tree and capability definitions are immutable at runtime (a
-# context's id/level/instance/path never change; capability rows are seed
-# data). Caching them removes ~3 DB round-trips from every has_capability call
-# — the dominant cost over a high-latency link. NOT cached: role_capability /
-# role_assignment, which change whenever a role is edited (the roles app's
-# whole point). A process restart clears these, so a schema/seed change is
-# picked up on the next boot.
-_CTX_CHAIN_CACHE: dict[int, tuple] = {}
-_CAP_CACHE: dict[str, dict | None] = {}
-
-
 async def _load_context_chain(db, context_id: int):
     """Return (path_ids_most_specific_first, context_labels, chain_rows)."""
-    cached = _CTX_CHAIN_CACHE.get(context_id)
-    if cached is not None:
-        return cached
     ctx = await db.fetch_one(
         "select id, level, instance_id, path, depth from context where id=$1",
         context_id,
     )
     if not ctx:
-        return [], {}, []  # not cached — the context may appear later
+        return [], {}, []
     path_ids = _parse_path(ctx["path"]) or [context_id]
     rows = await db.fetch_all(
         "select id, level, instance_id from context where id = any($1::bigint[])",
@@ -469,21 +456,14 @@ async def _load_context_chain(db, context_id: int):
     )
     labels = {r["id"]: f"{r['level']}:{r['instance_id']}" for r in rows}
     by_level = {r["level"]: r for r in rows}
-    result = (path_ids, labels, by_level)
-    _CTX_CHAIN_CACHE[context_id] = result
-    return result
+    return path_ids, labels, by_level
 
 
 async def _load_capability(db, name: str):
-    if name in _CAP_CACHE:
-        return _CAP_CACHE[name]
-    row = await db.fetch_one(
+    return await db.fetch_one(
         "select name, cap_type, min_context_level, risks from capability where name=$1",
         name,
     )
-    if row is not None:  # don't cache a miss — the cap may be seeded later
-        _CAP_CACHE[name] = row
-    return row
 
 
 async def _load_cap_rows(db, capability: str, path_ids: list[int]) -> list[CapRow]:
@@ -765,11 +745,27 @@ async def has_capability(db, user_id: int, capability: str, context_id: int,
         # capability (mirrors build_decision gate 1). This is what stops a
         # suspended user from acting on the mutation paths that gate on this.
         return False
+    if ident["is_admin"] and doanything and simulate_role is None:
+        return True
+
+    # PERF fast path: for a normal authenticated user, delegate the core
+    # resolution to the in-DB fn_can() — ONE round-trip — instead of the
+    # multi-query Python walk (_load_context_chain + _held_roles + _load_cap_rows),
+    # which cost ~15 sequential round-trips (multiple seconds against a remote
+    # DB). fn_can implements the same rules (prohibit-sticky, deepest-wins). An
+    # unknown capability simply resolves to not-granted. The Python path below is
+    # kept for guests (risk-blocking) and role simulation, which fn_can doesn't
+    # model.
+    if simulate_role is None and not ident["is_guest"]:
+        verdict = await db.fetch_val(
+            "select fn_can($1, $2, $3)", user_id, capability, context_id)
+        if isinstance(verdict, str):
+            verdict = json.loads(verdict)
+        return bool(verdict.get("granted")) if verdict else False
+
     cap = await _load_capability(db, capability)
     if cap is None:
         return False
-    if ident["is_admin"] and doanything and simulate_role is None:
-        return True
     path_ids, labels, _ = await _load_context_chain(db, context_id)
     held = await _held_roles(db, user_id, path_ids, labels, ident["is_guest"], simulate_role)
     if ident["is_guest"] and (

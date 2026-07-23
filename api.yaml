@@ -1,0 +1,5323 @@
+# GENERATED FILE — do not edit by hand.
+# Regenerate with: python3 scripts/generate-api-yaml.py
+# Source of truth: moodle-replica/backend/app/routers/*.py
+openapi: 3.1.0
+info:
+  title: Moodle Replica API
+  description: Skeleton API for the people & enrolment module.
+  version: 0.1.0
+paths:
+  /api/health:
+    get:
+      tags:
+      - health
+      summary: Health
+      description: Liveness + DB reachability (proves the deployed schema answers).
+      operationId: health_api_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/stats:
+    get:
+      tags:
+      - health
+      summary: Stats
+      description: 'Dashboard cards: seeded counts from the live DB.'
+      operationId: stats_api_stats_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/users:
+    get:
+      tags:
+      - users
+      summary: List Users
+      operationId: list_users_api_users_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/users/{user_id}:
+    get:
+      tags:
+      - users
+      summary: Get User
+      operationId: get_user_api_users__user_id__get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/courses:
+    get:
+      tags:
+      - courses
+      summary: List Courses
+      operationId: list_courses_api_courses_get
+      parameters:
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Include Deleted
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/courses/{course_id}:
+    get:
+      tags:
+      - courses
+      summary: Get Course
+      operationId: get_course_api_courses__course_id__get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/courses/{course_id}/activities:
+    get:
+      tags:
+      - courses
+      summary: List Activities
+      description: 'Activities of a course (Team-1 projection reads — bootstrap scope).
+
+        Powers the frontend''s activity-policy table over Mahmoud''s per-activity
+
+        policy endpoint.'
+      operationId: list_activities_api_courses__course_id__activities_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/courses/{course_id}/participants:
+    get:
+      tags:
+      - enrolment
+      summary: Participants
+      description: 'Participants = users WITH enrolment rows. Account-suspended users
+        stay
+
+        listed with a badge (C-6). Default filter mirrors Moodle: active.'
+      operationId: participants_api_enrolment_courses__course_id__participants_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(active|suspended|all)$
+          default: active
+          title: Status
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ParticipantOut'
+                title: Response Participants Api Enrolment Courses  Course Id  Participants
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/courses/{course_id}/other-users:
+    get:
+      tags:
+      - enrolment
+      summary: Other Users
+      description: Role-holders with NO enrolment (§8.8) — Khaled creates them.
+      operationId: other_users_api_enrolment_courses__course_id__other_users_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OtherUserOut'
+                title: Response Other Users Api Enrolment Courses  Course Id  Other
+                  Users Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/courses/{course_id}/methods:
+    get:
+      tags:
+      - enrolment
+      summary: Methods
+      operationId: methods_api_enrolment_courses__course_id__methods_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MethodOut'
+                title: Response Methods Api Enrolment Courses  Course Id  Methods
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - enrolment
+      summary: Create Method
+      operationId: create_method_api_enrolment_courses__course_id__methods_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MethodCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/methods/{method_id}:
+    patch:
+      tags:
+      - enrolment
+      summary: Patch Method
+      operationId: patch_method_api_enrolment_methods__method_id__patch
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MethodPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - enrolment
+      summary: Delete Method
+      description: 'Removes the instance; each enrolment through it goes through the
+        normal
+
+        per-path unenrol (provenance + last-path logic). Frontend HC-1 demo path.'
+      operationId: delete_method_api_enrolment_methods__method_id__delete
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/methods/{method_id}/enrolments:
+    get:
+      tags:
+      - enrolment
+      summary: Method Enrolments
+      operationId: method_enrolments_api_enrolment_methods__method_id__enrolments_get
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MethodEnrolmentOut'
+                title: Response Method Enrolments Api Enrolment Methods  Method Id  Enrolments
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - enrolment
+      summary: Enrol
+      operationId: enrol_api_enrolment_methods__method_id__enrolments_post
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrolRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/methods/{method_id}/enrolments/{user_id}:
+    delete:
+      tags:
+      - enrolment
+      summary: Unenrol
+      operationId: unenrol_api_enrolment_methods__method_id__enrolments__user_id__delete
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - enrolment
+      summary: Set Status
+      operationId: set_status_api_enrolment_methods__method_id__enrolments__user_id__patch
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrolmentStatusPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/courses/{course_id}/enrol:
+    post:
+      tags:
+      - enrolment
+      summary: Enrol By Course
+      description: 'Alias: resolve to a method (given method_id, else the course''s
+        manual
+
+        instance) then run the canonical enrol.'
+      operationId: enrol_by_course_api_enrolment_courses__course_id__enrol_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseEnrolRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/enrolments/{enrolment_id}:
+    patch:
+      tags:
+      - enrolment
+      summary: Set Status By Row
+      operationId: set_status_by_row_api_enrolment_enrolments__enrolment_id__patch
+      parameters:
+      - name: enrolment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Enrolment Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrolmentStatusPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - enrolment
+      summary: Unenrol By Row
+      operationId: unenrol_by_row_api_enrolment_enrolments__enrolment_id__delete
+      parameters:
+      - name: enrolment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Enrolment Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/self/{course_id}:
+    post:
+      tags:
+      - enrolment
+      summary: Self Enrol
+      description: 'Returns the gate-chain verdict with the failing gate named (§6.6).
+
+
+        Identity first: self-enrolment is only for yourself — the body''s user_id
+
+        must be the principal. Then the capability (fail-closed until seeded).'
+      operationId: self_enrol_api_enrolment_self__course_id__post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelfEnrolRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfEnrolVerdict'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/methods/{method_id}/sync:
+    post:
+      tags:
+      - enrolment
+      summary: Sync
+      description: Manual cohort-sync trigger for the demo (§6.8, policy UNENROL).
+      operationId: sync_api_enrolment_methods__method_id__sync_post
+      parameters:
+      - name: method_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Method Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/guest-preview/{course_id}:
+    get:
+      tags:
+      - enrolment
+      summary: Guest Preview
+      description: 'Guests never get enrolment rows (§6.7) — only answers if the switch
+        is
+
+        on. Deliberately open: it answers a pre-auth question ("can a guest get
+
+        in?"), so requiring a principal would defeat it.'
+      operationId: guest_preview_api_enrolment_guest_preview__course_id__get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestPreviewOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/cohorts:
+    get:
+      tags:
+      - enrolment
+      summary: Cohorts
+      description: 'Principal required, no capability: names + counts are the reference
+
+        data the method-create form needs, and an editingteacher legitimately
+
+        configures cohort methods while holding no system-context role.'
+      operationId: cohorts_api_enrolment_cohorts_get
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CohortOut'
+                title: Response Cohorts Api Enrolment Cohorts Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - enrolment
+      summary: Create Cohort
+      operationId: create_cohort_api_enrolment_cohorts_post
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CohortCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/cohorts/{cohort_id}/members:
+    post:
+      tags:
+      - enrolment
+      summary: Add Member
+      description: Membership change syncs every course method pointing at this cohort.
+      operationId: add_member_api_enrolment_cohorts__cohort_id__members_post
+      parameters:
+      - name: cohort_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Cohort Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CohortMemberAdd'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/cohorts/{cohort_id}/members/{user_id}:
+    delete:
+      tags:
+      - enrolment
+      summary: Remove Member
+      operationId: remove_member_api_enrolment_cohorts__cohort_id__members__user_id__delete
+      parameters:
+      - name: cohort_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Cohort Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/enrolment/users/{user_id}/enrolments:
+    get:
+      tags:
+      - enrolment
+      summary: User Enrolments
+      description: 'Your own paths are yours to see; anyone else''s need user:viewdetails
+
+        (same rule as GET /api/users/{id}).'
+      operationId: user_enrolments_api_enrolment_users__user_id__enrolments_get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserPathOut'
+                title: Response User Enrolments Api Enrolment Users  User Id  Enrolments
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/roles/capabilities:
+    get:
+      tags:
+      - roles
+      summary: List Capabilities
+      description: 'The capability catalogue (config read). Feeds the Permission Checker''s
+
+        capability picker — CR-5, previously only served by the frontend mock.'
+      operationId: list_capabilities_api_roles_capabilities_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/roles/contexts:
+    get:
+      tags:
+      - roles
+      summary: List Contexts
+      description: 'The context tree (config read). label = ''level:instance_id''.
+        Feeds context
+
+        pickers — CR-5, previously only served by the frontend mock.'
+      operationId: list_contexts_api_roles_contexts_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/roles/assignable:
+    get:
+      tags:
+      - roles
+      summary: Get Assignable
+      description: 'The allow-assign matrix result for the AUTHENTICATED actor at
+        this context.
+
+        Demonstrates "capability necessary, matrix also required" (§9.7 ex.4).'
+      operationId: get_assignable_api_roles_assignable_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: context_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Context Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/roles/assignments:
+    get:
+      tags:
+      - roles
+      summary: List Assignments
+      description: 'Assignments in one context (config/roster read). Feeds the Assignments
+
+        tab — CR-5, previously served only by the frontend mock.'
+      operationId: list_assignments_api_roles_assignments_get
+      parameters:
+      - name: context_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Context Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - roles
+      summary: Create Assignment
+      description: 'Manually assign a role at a context (component=''''). The actor
+        is the
+
+        authenticated principal; the service enforces role:assign + the allow-assign
+
+        matrix — a 403 otherwise.'
+      operationId: create_assignment_api_roles_assignments_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRoleIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/roles/users/{user_id}/assignments:
+    get:
+      tags:
+      - roles
+      summary: User Assignments
+      description: 'Every role the user holds, with the context path and provenance
+        (who
+
+        created the assignment: manual, or an enrol_% sync).'
+      operationId: user_assignments_api_roles_users__user_id__assignments_get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/roles/assignments/{assignment_id}:
+    delete:
+      tags:
+      - roles
+      summary: Delete Assignment
+      description: 'Unassign a MANUAL role. Requires role:assign at the assignment''s
+        context;
+
+        enrol_% rows belong to enrolment flows and are refused with a 403.'
+      operationId: delete_assignment_api_roles_assignments__assignment_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: assignment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Assignment Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/roles:
+    get:
+      tags:
+      - roles
+      summary: List Roles
+      operationId: list_roles_api_roles_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/RoleOut'
+                type: array
+                title: Response List Roles Api Roles Get
+    post:
+      tags:
+      - roles
+      summary: Create Role
+      description: Create a role definition. Requires role:manage at system (admin
+        bypasses).
+      operationId: create_role_api_roles_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/roles/{role_id}/clone:
+    post:
+      tags:
+      - roles
+      summary: Clone Role
+      description: 'Clone a role, copying its system-context definition (its role_capability
+
+        rows). Deeper overrides are not copied. Requires role:manage (admin bypasses).'
+      operationId: clone_role_api_roles__role_id__clone_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Role Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleClone'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/roles/{role_id}/capabilities:
+    get:
+      tags:
+      - roles
+      summary: Role Capabilities
+      description: 'The role''s resolved capability sheet at a context (definition
+        + overrides
+
+        marked).'
+      operationId: role_capabilities_api_roles__role_id__capabilities_get
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Role Id
+      - name: context_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Context Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CapabilitySheetRow'
+                title: Response Role Capabilities Api Roles  Role Id  Capabilities
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - roles
+      summary: Set Role Capability
+      description: 'Set/replace/clear a capability for the role at a context. Requires
+
+        role:override at that context (admin bypasses). permission=null DELETES the
+
+        row → back to ''Not set'' (inherit). An unknown capability → 400.'
+      operationId: set_role_capability_api_roles__role_id__capabilities_put
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Role Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetCapability'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups:
+    get:
+      tags:
+      - groups
+      summary: List Groups
+      operationId: list_groups_api_groups_get
+      parameters:
+      - name: course_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - groups
+      summary: Create Group
+      operationId: create_group_api_groups_post
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/{group_id}:
+    delete:
+      tags:
+      - groups
+      summary: Delete Group
+      operationId: delete_group_api_groups__group_id__delete
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Group Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/{group_id}/members:
+    get:
+      tags:
+      - groups
+      summary: List Members
+      operationId: list_members_api_groups__group_id__members_get
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Group Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - groups
+      summary: Add Member
+      operationId: add_member_api_groups__group_id__members_post
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Group Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberAdd'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/{group_id}/members/{user_id}:
+    delete:
+      tags:
+      - groups
+      summary: Remove Member
+      operationId: remove_member_api_groups__group_id__members__user_id__delete
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Group Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: force
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Force
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/groupings:
+    get:
+      tags:
+      - groups
+      summary: List Groupings
+      operationId: list_groupings_api_groups_groupings_get
+      parameters:
+      - name: course_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - groups
+      summary: Create Grouping
+      operationId: create_grouping_api_groups_groupings_post
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupingCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/groupings/{grouping_id}/groups:
+    post:
+      tags:
+      - groups
+      summary: Assign Group
+      operationId: assign_group_api_groups_groupings__grouping_id__groups_post
+      parameters:
+      - name: grouping_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Grouping Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupingGroupAdd'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/activities/{activity_id}:
+    patch:
+      tags:
+      - groups
+      summary: Patch Activity Policy
+      operationId: patch_activity_policy_api_groups_activities__activity_id__patch
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityPolicyPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/activities/{activity_id}/policy:
+    get:
+      tags:
+      - groups
+      summary: Activity Policy
+      operationId: activity_policy_api_groups_activities__activity_id__policy_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/activities/{activity_id}/allowed:
+    get:
+      tags:
+      - groups
+      summary: Activity Allowed Groups
+      operationId: activity_allowed_groups_api_groups_activities__activity_id__allowed_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/activities/{activity_id}/availability:
+    get:
+      tags:
+      - groups
+      summary: Activity Availability
+      description: T2-GRP-005 — is this activity available to the user, and hidden
+        vs greyed.
+      operationId: activity_availability_api_groups_activities__activity_id__availability_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/groups/access-check:
+    post:
+      tags:
+      - groups
+      summary: Access Check
+      operationId: access_check_api_groups_access_check_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessCheckRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress:
+    get:
+      tags:
+      - progress
+      summary: Get Progress
+      description: 'Progress for one user in one course (both mechanisms combined).
+
+
+        Returns the stored record with `enrolled` reflecting live enrolment; gating
+
+        a single lookup is the caller''s choice.'
+      operationId: get_progress_api_progress_get
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: course_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseProgress'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/course/{course_id}:
+    get:
+      tags:
+      - progress
+      summary: Progress By Course
+      description: 'Currently-enrolled participants'' progress. include_unenrolled=true
+        for an
+
+        admin/historical view of everyone who ever had a completion record.'
+      operationId: progress_by_course_api_progress_course__course_id__get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: include_unenrolled
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Unenrolled
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseProgress'
+                title: Response Progress By Course Api Progress Course  Course Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/user/{user_id}:
+    get:
+      tags:
+      - progress
+      summary: Progress By User
+      description: A user's progress across their currently-enrolled courses by default.
+      operationId: progress_by_user_api_progress_user__user_id__get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: include_unenrolled
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Unenrolled
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseProgress'
+                title: Response Progress By User Api Progress User  User Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/complete:
+    post:
+      tags:
+      - progress
+      summary: Mark Complete
+      description: 'Manually mark a course complete (mechanism #2), write-once (T2-PRG-002).
+
+
+        If already completed this is a no-op returning the stored record — so a
+
+        benign re-POST never trips the DB write-once trigger with a 409.'
+      operationId: mark_complete_api_progress_complete_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseProgress'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - progress
+      summary: Unmark Complete
+      description: 'Un-completion is blocked by the DB write-once trigger (M13) and
+        returns
+
+        409. A proper authorised, audited reset needs a trigger-permitted path
+
+        (coordinate with D-IMMUT); left failing loudly so it''s visible in testing.'
+      operationId: unmark_complete_api_progress_complete_delete
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: course_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseProgress'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/activity:
+    post:
+      tags:
+      - progress
+      summary: Set Activity Completion
+      description: 'Automatic activity-completion write path (Part A).
+
+
+        If the activity is manually overridden (overridden_by set), the automatic
+
+        path is locked out (no-op) — Moodle stops auto-updating an overridden
+
+        activity. Recomputes course completion afterward.'
+      operationId: set_activity_completion_api_progress_activity_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityCompletion'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseProgress'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/activity/override:
+    post:
+      tags:
+      - progress
+      summary: Override Activity Completion
+      description: 'Capability-gated manual override (Part C).
+
+
+        The actor must hold COMPLETION_OVERRIDE_CAP at the activity''s (or course''s)
+
+        context per fn_can. Sets overridden_by so the automatic path no longer
+
+        touches this activity. Audited. Fail-closed: if fn_can can''t be consulted,
+
+        the override is denied.'
+      operationId: override_activity_completion_api_progress_activity_override_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityOverride'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseProgress'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/snapshots:
+    get:
+      tags:
+      - progress
+      summary: List Snapshots
+      description: Completion history, including for deleted courses (HC-5).
+      operationId: list_snapshots_api_progress_snapshots_get
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/progress/courses/{course_id}/report:
+    get:
+      tags:
+      - progress
+      summary: Course Report
+      operationId: course_report_api_progress_courses__course_id__report_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: group_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Group Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/permissions/dev-login:
+    post:
+      tags:
+      - permissions
+      summary: Dev Login
+      description: 'DEV ONLY — mint a session token so the SPA can authenticate. Gated
+        by two
+
+        env vars: it 404s unless AUTH_DEV_LOGIN=1 AND AUTH_SECRET is set, so a
+
+        production deploy (neither set) never exposes a credential mint. This is the
+
+        demo stand-in for a real login/IdP; identity is still VERIFIED on every
+
+        request via the signed token.'
+      operationId: dev_login_api_permissions_dev_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DevLoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/permissions/check:
+    post:
+      tags:
+      - permissions
+      summary: Check
+      description: 'The centrepiece. Returns allowed + decision + every gate''s evidence.
+
+
+        The verdict is computed for the SUBJECT (req.actor_user_id). Inspecting a
+
+        subject other than yourself requires user:viewdetails at the context (admin
+
+        bypasses) — so a student cannot enumerate another user''s access.'
+      operationId: check_api_permissions_check_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/permissions/decisions:
+    get:
+      tags:
+      - permissions
+      summary: Decisions
+      description: The audit log — every /check call, newest first.
+      operationId: decisions_api_permissions_decisions_get
+      parameters:
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/login:
+    post:
+      tags:
+      - auth
+      summary: Login
+      operationId: login_api_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/signup:
+    post:
+      tags:
+      - auth
+      summary: Signup
+      operationId: signup_api_auth_signup_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/confirm:
+    post:
+      tags:
+      - auth
+      summary: Confirm
+      operationId: confirm_api_auth_confirm_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/me:
+    get:
+      tags:
+      - auth
+      summary: Me
+      operationId: me_api_auth_me_get
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/profile:
+    patch:
+      tags:
+      - auth
+      summary: Update Profile
+      description: 'Own-account maintenance (Dashboard ⚙️ My account): rename + password
+
+        change. Credentialed accounts must prove the current password; demo
+
+        personas (no app_credential row) may set one, which creates a confirmed
+
+        credential.'
+      operationId: update_profile_api_auth_profile_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses:
+    get:
+      tags:
+      - lms
+      summary: List Courses
+      description: 'All courses; soft-deleted ones stay queryable via ?include_deleted=1
+
+        (hard case #5: history outlives the course).'
+      operationId: list_courses_api_lms_courses_get
+      parameters:
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Include Deleted
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - lms
+      summary: Create Course
+      description: 'Create a course directly. Gated on the course:create capability
+        at the
+
+        SYSTEM context — a category/site-level power in Moodle — so Manager, Course
+
+        creator, and (this team''s extension, T2-ROLES-001) a SITE-level editing
+
+        teacher may create courses, with the site-admin bypass intact. A
+
+        course-scoped editing teacher, a non-editing teacher, or a student is
+
+        refused (403) and should request a course instead (requests.py: approval
+
+        makes them its teacher).
+
+
+        Writes ONLY the course row. The course-level *context* (permission spine)
+
+        and default *enrolment methods* belong to other domains and are not written
+
+        here; when the context is still absent the response says so.'
+      operationId: create_course_api_lms_courses_post
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}:
+    get:
+      tags:
+      - lms
+      summary: Get Course
+      description: 'Course detail. `?actor_id` is a legacy hint — identity is the
+        principal;
+
+        it is accepted so existing frontend links do not 422.'
+      operationId: get_course_api_lms_courses__course_id__get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - lms
+      summary: Update Course
+      description: Edit a course (visibility toggle / rename) — ADMIN only (AdminPage
+        CoursesTab).
+      operationId: update_course_api_lms_courses__course_id__patch
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - lms
+      summary: Delete Course
+      description: 'Soft-delete a course (deleted_at) — ADMIN only. History survives
+        (HC-5);
+
+        completion/enrolment rows are deliberately NOT touched.'
+      operationId: delete_course_api_lms_courses__course_id__delete
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/catalog:
+    get:
+      tags:
+      - lms
+      summary: Catalog
+      description: "Every visible, non-deleted course with the SUBJECT's own state\
+        \ and the\nenrolment options open to them. `?user_id` names the subject (a\
+        \ student's\nown view); it defaults to the principal.\n\nPer course (frontend\
+        \ contract, mirrors mocks/lms.js):\n  course           — the course projection\n\
+        \  my_status        — active|suspended|expired|method_disabled|\n        \
+        \             account_suspended, or null when not enrolled\n  teaching   \
+        \      — role != enrolment: teachers appear via role assignment\n  request_pending\
+        \  — a pending enrol_request exists (read if that table is\n             \
+        \        present; false otherwise)\n  options.self_enrol {requires_key} |\
+        \ null\n  options.can_request — a manual method exists (our request-to-enrol\
+        \ path)"
+      operationId: catalog_api_lms_catalog_get
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/users:
+    get:
+      tags:
+      - lms
+      summary: List Users
+      description: 'Active accounts. Soft-deleted users are hidden (their history
+        survives
+
+        through progress snapshots — hard case #5).'
+      operationId: list_users_api_lms_users_get
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - lms
+      summary: Create User
+      description: 'Create an account — ADMIN only. Admin-created accounts are usable
+
+        immediately (no confirmation-email gate — that belongs to self-registration
+
+        only, Moodle''s rule).
+
+
+        Note: credentials (app_credential) are Khaled''s auth domain and are NOT
+
+        written here. Without one, the new account signs in as a demo persona (any
+
+        password) — still "usable right now"; a real password hash lands when auth
+
+        owns this create.'
+      operationId: create_user_api_lms_users_post
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/users/{user_id}:
+    patch:
+      tags:
+      - lms
+      summary: Patch User
+      description: 'Site-wide account suspend/reactivate — ADMIN only. Suspension
+        refuses
+
+        sign-in but never touches enrolments, grades or completions (C-6); the
+
+        roster keeps showing them. No self-lockout: you cannot suspend yourself.'
+      operationId: patch_user_api_lms_users__user_id__patch
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/users/{user_id}/toggle-manager:
+    post:
+      tags:
+      - lms
+      summary: Toggle Manager
+      description: 'Grant or revoke the Manager role at the System context — ADMIN
+        only.
+
+        No self-demotion: an admin cannot revoke their own manager role (the last
+
+        thing an admin does is lock themselves out).'
+      operationId: toggle_manager_api_lms_users__user_id__toggle_manager_post
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/activities:
+    get:
+      tags:
+      - lms
+      summary: Course Activities
+      description: 'Activities of a course. Hidden activities vanish for students
+        and are
+
+        shown to staff (editing/non-editing teacher, manager, admin) — the viewer
+        is
+
+        the principal. When `user_id` names a subject, each activity carries that
+
+        subject''s `completion` state (from activity_completion); `completion` is
+        null
+
+        where nothing is tracked. Submission/quiz rollups (`mine`, `queue`) belong
+        to
+
+        the assign/quiz grading modules and are intentionally not synthesised here.'
+      operationId: course_activities_api_lms_courses__course_id__activities_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - lms
+      summary: Create Activity
+      description: 'Create an activity (TeachingPage -> Content). Staff only. For
+        a quiz, also
+
+        creates its settings + questions (correct answers stay server-side).'
+      operationId: create_activity_api_lms_courses__course_id__activities_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/enrol:
+    post:
+      tags:
+      - lms
+      summary: Enrol User
+      description: 'Manual enrolment from the roster (Moodle Participants → "Enrol
+        users").
+
+        enrol/manual:enrol is an editing-teacher power; non-editing teachers are
+
+        refused. Finds the course''s enabled manual method, then delegates the write
+
+        to enrol_svc.enrol_user (the enrolment row + its provenance role row).'
+      operationId: enrol_user_api_lms_courses__course_id__enrol_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/self-enrol:
+    post:
+      tags:
+      - lms
+      summary: Self Enrol
+      description: 'Self-enrolment (enrol/self:enrolself). Only for yourself; suspended
+
+        accounts cannot enrol (C-6 — a site-wide switch, distinct from enrolment
+
+        status). Delegates to enrol_svc.self_enrol and translates its gate-chain
+
+        verdict into HTTP: a failing gate → 403 with the reason, already active →
+
+        409. Deliberately NOT gated on the unseeded enrol:selfenrol capability,
+
+        which would fail closed for every student.'
+      operationId: self_enrol_api_lms_courses__course_id__self_enrol_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/unenrol-self:
+    post:
+      tags:
+      - lms
+      summary: Unenrol Self
+      description: 'Moodle-faithful: only a SELF-enrolled path may be self-removed
+
+        (enrol/self:unenrolself). Manual/cohort paths refuse with the reason — ask
+        a
+
+        teacher. Completions and grades survive (enrol_svc never deletes them). If
+
+        another (non-self) path keeps the user in, the note says so.'
+      operationId: unenrol_self_api_lms_courses__course_id__unenrol_self_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/remove-role:
+    post:
+      tags:
+      - lms
+      summary: Remove Role
+      description: 'Remove a course role assignment (e.g. demote a non-editing teacher).
+
+        role:assign gates it (editing teacher / manager / admin). Machine-owned
+
+        (enrol_%) assignments refuse — those belong to enrolment sync, not the roles
+
+        UI — via permissions.unassign_role''s provenance guard.'
+      operationId: remove_role_api_lms_courses__course_id__remove_role_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/enrolments/{enrolment_id}:
+    get:
+      tags:
+      - lms
+      summary: Get Enrolment
+      description: 'Read one enrolment path with its liveness verdict. Your own path
+        is yours
+
+        to see; anyone else''s needs course:viewparticipants at the course context.'
+      operationId: get_enrolment_api_lms_enrolments__enrolment_id__get
+      parameters:
+      - name: enrolment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Enrolment Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - lms
+      summary: Unenrol Path
+      description: 'Unenrol one path (editing teacher / manager / admin, via enrol:unenrol).
+
+        An active cohort-synced path refuses (sync would recreate it — suspend or
+
+        remove the cohort membership instead), surfaced as the service''s 409.
+
+        Completions and grades survive.'
+      operationId: unenrol_path_api_lms_enrolments__enrolment_id__delete
+      parameters:
+      - name: enrolment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Enrolment Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - lms
+      summary: Set Enrolment Status
+      description: 'Suspend / reactivate one enrolment path (RosterTab). Staff power
+
+        (enrol:manual at the course context); routes through the enrolment service
+
+        so its change-gate + audit apply.'
+      operationId: set_enrolment_status_api_lms_enrolments__enrolment_id__patch
+      parameters:
+      - name: enrolment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Enrolment Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/course-requests:
+    get:
+      tags:
+      - lms
+      summary: List Course Requests
+      description: Admin sees every request; a teacher sees only their own (mock filter).
+      operationId: list_course_requests_api_lms_course_requests_get
+      parameters:
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - lms
+      summary: Create Course Request
+      description: 'A teacher requests a new course. Any authenticated principal may
+        ask
+
+        (Moodle''s moodle/course:request); a manager decides later.'
+      operationId: create_course_request_api_lms_course_requests_post
+      parameters:
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/course-requests/{request_id}/{action}:
+    post:
+      tags:
+      - lms
+      summary: Decide Course Request
+      description: 'Manager-only. reject -> mark rejected. approve -> create the course
+
+        (with a manual enrolment method) and make the requester its editing
+
+        teacher, then mark approved (Moodle-faithful).'
+      operationId: decide_course_request_api_lms_course_requests__request_id___action__post
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Request Id
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Action
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/my-requests:
+    get:
+      tags:
+      - lms
+      summary: My Enrol Requests
+      description: The requester's own enrolment requests, each with its course.
+      operationId: my_enrol_requests_api_lms_my_requests_get
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/enrol-request:
+    post:
+      tags:
+      - lms
+      summary: Create Enrol Request
+      description: 'A user asks to be enrolled where they cannot self-enrol. The requester
+
+        is the principal (body.user_id is legacy).'
+      operationId: create_enrol_request_api_lms_courses__course_id__enrol_request_post
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/courses/{course_id}/enrol-requests:
+    get:
+      tags:
+      - lms
+      summary: List Enrol Requests
+      description: This course's staff (teacher/manager) see every enrolment request.
+      operationId: list_enrol_requests_api_lms_courses__course_id__enrol_requests_get
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Course Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/enrol-requests/{request_id}/{action}:
+    post:
+      tags:
+      - lms
+      summary: Decide Enrol Request
+      description: 'Course staff decide. deny -> mark denied. approve -> enrol via
+        the
+
+        course''s manual method (enrol_svc) and mark approved.'
+      operationId: decide_enrol_request_api_lms_enrol_requests__request_id___action__post
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Request Id
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Action
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/activities/{activity_id}:
+    get:
+      tags:
+      - lms
+      summary: Activity Detail
+      description: 'One activity''s detail. A hidden activity vanishes for non-staff
+        (Moodle:
+
+        hide = it stops existing for students), so we 404 it for them.'
+      operationId: activity_detail_api_lms_activities__activity_id__get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - lms
+      summary: Update Activity
+      description: Edit an activity (rename / show-hide / quiz attempts) — staff only.
+      operationId: update_activity_api_lms_activities__activity_id__patch
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/activities/{activity_id}/quiz:
+    get:
+      tags:
+      - lms
+      summary: Get Quiz
+      description: 'The quiz for the taker: questions[] WITHOUT the key, the attempt
+        limits,
+
+        and my_attempts[] (the caller''s own attempts). `user_id` names the subject
+
+        to look up (a student''s own view); it defaults to the principal.'
+      operationId: get_quiz_api_lms_activities__activity_id__quiz_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/activities/{activity_id}/attempts:
+    post:
+      tags:
+      - lms
+      summary: Start Attempt
+      description: 'Start a fresh attempt FOR THE PRINCIPAL (any user_id in the body
+        is
+
+        legacy and ignored for identity). One open attempt at a time; capped at
+
+        attempts_allowed; the taker must be an active participant.'
+      operationId: start_attempt_api_lms_activities__activity_id__attempts_post
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - lms
+      summary: List Attempts
+      description: 'Every attempt on this quiz, for marking. Teacher-gated. Each row
+        carries
+
+        the student, the questions WITH the key, and per-target can_grade (HC-3).'
+      operationId: list_attempts_api_lms_activities__activity_id__attempts_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/attempts/{attempt_id}:
+    get:
+      tags:
+      - lms
+      summary: Get Attempt
+      description: 'One attempt with its answers + state. The owner sees it; so does
+        a
+
+        teacher of the course. Correct answers are never included here.'
+      operationId: get_attempt_api_lms_attempts__attempt_id__get
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Attempt Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - lms
+      summary: Save Attempt
+      description: 'Save progress: merge answers into the OPEN attempt. Owner-only.'
+      operationId: save_attempt_api_lms_attempts__attempt_id__patch
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Attempt Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/attempts/{attempt_id}/finish:
+    post:
+      tags:
+      - lms
+      summary: Finish Attempt
+      description: 'Submit the attempt. Optionally saves answers[] first, then auto-grades
+
+        the objective questions into `auto_score`. If the quiz has any essay, the
+
+        attempt lands in ''finished'' (awaiting marking); otherwise it is ''graded''.'
+      operationId: finish_attempt_api_lms_attempts__attempt_id__finish_post
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Attempt Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              default: {}
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/attempts/{attempt_id}/grade-essay:
+    post:
+      tags:
+      - lms
+      summary: Grade Essay
+      description: 'A teacher marks one essay answer (points + optional feedback).
+        When every
+
+        essay in the attempt has a mark, the attempt flips ''finished'' → ''graded''
+        and
+
+        `total` = auto_score + the essay points.'
+      operationId: grade_essay_api_lms_attempts__attempt_id__grade_essay_post
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Attempt Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/activities/{activity_id}/submission:
+    get:
+      tags:
+      - lms
+      summary: Get Submission
+      description: 'The subject''s submission for this activity, with its grade/feedback/state.
+
+        `?user_id=` names the subject (a student viewing their own work); reading
+
+        somebody else''s submission requires a teacher of the course.'
+      operationId: get_submission_api_lms_activities__activity_id__submission_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - lms
+      summary: Save Submission
+      description: 'The principal saves a draft or hands in. `action` is ''draft''
+        | ''submit'';
+
+        submitting requires the Moodle submission statement and LOCKS the work
+
+        (submission_status=''submitted'') until a teacher reverts it.'
+      operationId: save_submission_api_lms_activities__activity_id__submission_post
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Payload
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/activities/{activity_id}/submissions:
+    get:
+      tags:
+      - lms
+      summary: List Submissions
+      description: 'Every submission to this activity, for a teacher to grade. Each
+        row
+
+        carries the submitter (`user`) and `can_grade` — the HC-3 group-scope
+
+        preview that the actual grade write enforces.'
+      operationId: list_submissions_api_lms_activities__activity_id__submissions_get
+      parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Activity Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/submissions/{submission_id}/grade:
+    post:
+      tags:
+      - lms
+      summary: Grade Submission
+      description: 'Record a mark + feedback for one submission (0–100). A draft cannot
+        be
+
+        graded — the student has not handed in yet. Re-grading an already-graded
+
+        submission is allowed (it overwrites).'
+      operationId: grade_submission_api_lms_submissions__submission_id__grade_post
+      parameters:
+      - name: submission_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Submission Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Payload
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/submissions/{submission_id}/revert:
+    post:
+      tags:
+      - lms
+      summary: Revert Submission
+      description: 'Unlock a submitted (or graded) submission back to draft so the
+        student
+
+        can edit and resubmit. The grade stays on record — reverting is not
+
+        un-marking (it just drops out of the released ''graded'' status).'
+      operationId: revert_submission_api_lms_submissions__submission_id__revert_post
+      parameters:
+      - name: submission_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Submission Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Payload
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/lms/my-grades:
+    get:
+      tags:
+      - lms
+      summary: My Grades
+      description: 'The subject''s released grades, one row per graded activity —
+        the
+
+        Dashboard ''My grades'' strip. A grade only appears while its submission is
+
+        still handed in (a reverted submission drops out, matching Moodle).'
+      operationId: my_grades_api_lms_my_grades_get
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      - name: x-acting-user
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: X-Acting-User
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AccessCheckRequest:
+      properties:
+        actor_user_id:
+          type: integer
+          title: Actor User Id
+        target_user_id:
+          type: integer
+          title: Target User Id
+        activity_id:
+          type: integer
+          title: Activity Id
+        action:
+          type: string
+          title: Action
+          default: grade
+      type: object
+      required:
+      - actor_user_id
+      - target_user_id
+      - activity_id
+      title: AccessCheckRequest
+    ActivityCompletion:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        activity_id:
+          type: integer
+          title: Activity Id
+        state:
+          type: string
+          title: State
+        viewed:
+          type: boolean
+          title: Viewed
+          default: false
+      type: object
+      required:
+      - user_id
+      - activity_id
+      - state
+      title: ActivityCompletion
+    ActivityOverride:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        activity_id:
+          type: integer
+          title: Activity Id
+        state:
+          type: string
+          title: State
+        actor_id:
+          type: integer
+          title: Actor Id
+      type: object
+      required:
+      - user_id
+      - activity_id
+      - state
+      - actor_id
+      title: ActivityOverride
+    ActivityPolicyPatch:
+      properties:
+        group_mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Group Mode
+          default: __keep__
+        grouping_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Grouping Id
+          default: __keep__
+      type: object
+      title: ActivityPolicyPatch
+    AssignRoleIn:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        role_id:
+          type: integer
+          title: Role Id
+        context_id:
+          type: integer
+          title: Context Id
+      type: object
+      required:
+      - user_id
+      - role_id
+      - context_id
+      title: AssignRoleIn
+    CapabilitySheetRow:
+      properties:
+        capability:
+          type: string
+          title: Capability
+        cap_type:
+          type: string
+          title: Cap Type
+        risks:
+          items:
+            type: string
+          type: array
+          title: Risks
+          default: []
+        permission:
+          anyOf:
+          - type: string
+            enum:
+            - allow
+            - prevent
+            - prohibit
+          - type: 'null'
+          title: Permission
+        is_override:
+          type: boolean
+          title: Is Override
+          default: false
+        decided_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Decided At
+      type: object
+      required:
+      - capability
+      - cap_type
+      title: CapabilitySheetRow
+    CheckRequest:
+      properties:
+        actor_user_id:
+          type: integer
+          title: Actor User Id
+        capability:
+          type: string
+          title: Capability
+        context_id:
+          type: integer
+          title: Context Id
+        target_user_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Target User Id
+        activity_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Activity Id
+        simulate_role_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Simulate Role Id
+        action:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Action
+      type: object
+      required:
+      - actor_user_id
+      - capability
+      - context_id
+      title: CheckRequest
+    CheckResponse:
+      properties:
+        allowed:
+          type: boolean
+          title: Allowed
+        decision:
+          type: string
+          title: Decision
+        blocking_reasons:
+          items:
+            type: string
+          type: array
+          title: Blocking Reasons
+        supporting_reasons:
+          items:
+            type: string
+          type: array
+          title: Supporting Reasons
+        enrolment_paths:
+          items: {}
+          type: array
+          title: Enrolment Paths
+        roles_considered:
+          items: {}
+          type: array
+          title: Roles Considered
+        contexts_considered:
+          items:
+            type: string
+          type: array
+          title: Contexts Considered
+        capability_values:
+          additionalProperties: true
+          type: object
+          title: Capability Values
+        prohibits_found:
+          items: {}
+          type: array
+          title: Prohibits Found
+        group_scope:
+          additionalProperties: true
+          type: object
+          title: Group Scope
+        admin_bypass:
+          type: boolean
+          title: Admin Bypass
+        simulated_role:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Simulated Role
+      type: object
+      required:
+      - allowed
+      - decision
+      - blocking_reasons
+      - supporting_reasons
+      - enrolment_paths
+      - roles_considered
+      - contexts_considered
+      - capability_values
+      - prohibits_found
+      - group_scope
+      - admin_bypass
+      - simulated_role
+      title: CheckResponse
+    CohortCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        id_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id Number
+        description:
+          type: string
+          title: Description
+          default: ''
+      type: object
+      required:
+      - name
+      title: CohortCreate
+    CohortMemberAdd:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+      type: object
+      required:
+      - user_id
+      title: CohortMemberAdd
+    CohortOut:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        id_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id Number
+        member_count:
+          type: integer
+          title: Member Count
+        synced_courses:
+          items:
+            type: string
+          type: array
+          title: Synced Courses
+      type: object
+      required:
+      - id
+      - name
+      - id_number
+      - member_count
+      - synced_courses
+      title: CohortOut
+    CompleteRequest:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        course_id:
+          type: integer
+          title: Course Id
+        actor_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Actor Id
+      type: object
+      required:
+      - user_id
+      - course_id
+      title: CompleteRequest
+    CourseEnrolRequest:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        role_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Role Id
+        time_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time Start
+        time_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time End
+        activate:
+          type: boolean
+          title: Activate
+          default: false
+        method_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Method Id
+      type: object
+      required:
+      - user_id
+      title: CourseEnrolRequest
+      description: 'Contract alias POST /courses/{id}/enrol — method optional, defaults
+        to
+
+        the course''s manual method.'
+    CourseProgress:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        course_id:
+          type: integer
+          title: Course Id
+        short_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Short Name
+        activities_done:
+          type: integer
+          title: Activities Done
+        activities_total:
+          type: integer
+          title: Activities Total
+        percent_complete:
+          type: number
+          title: Percent Complete
+        percent_remaining:
+          type: number
+          title: Percent Remaining
+        calculated_complete:
+          type: boolean
+          title: Calculated Complete
+        manually_completed:
+          type: boolean
+          title: Manually Completed
+        time_completed:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Time Completed
+        completed:
+          type: boolean
+          title: Completed
+        enrolled:
+          type: boolean
+          title: Enrolled
+      type: object
+      required:
+      - user_id
+      - course_id
+      - activities_done
+      - activities_total
+      - percent_complete
+      - percent_remaining
+      - calculated_complete
+      - manually_completed
+      - completed
+      - enrolled
+      title: CourseProgress
+    DevLoginRequest:
+      properties:
+        username:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Username
+        user_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: User Id
+      type: object
+      title: DevLoginRequest
+    EnrolRequest:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        role_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Role Id
+        time_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time Start
+        time_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time End
+        activate:
+          type: boolean
+          title: Activate
+          default: false
+      type: object
+      required:
+      - user_id
+      title: EnrolRequest
+    EnrolmentStatusPatch:
+      properties:
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          title: Status
+      type: object
+      required:
+      - status
+      title: EnrolmentStatusPatch
+    GateOut:
+      properties:
+        gate:
+          type: string
+          enum:
+          - course_visible
+          - method_enabled
+          - window_open
+          - capacity
+          - key_match
+          title: Gate
+        passed:
+          type: boolean
+          title: Passed
+        reason:
+          type: string
+          title: Reason
+          default: ''
+      type: object
+      required:
+      - gate
+      - passed
+      title: GateOut
+    GroupCreate:
+      properties:
+        course_id:
+          type: integer
+          title: Course Id
+        name:
+          type: string
+          title: Name
+        id_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id Number
+        enrolment_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Enrolment Key
+      type: object
+      required:
+      - course_id
+      - name
+      title: GroupCreate
+    GroupingCreate:
+      properties:
+        course_id:
+          type: integer
+          title: Course Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+      type: object
+      required:
+      - course_id
+      - name
+      title: GroupingCreate
+    GroupingGroupAdd:
+      properties:
+        group_id:
+          type: integer
+          title: Group Id
+      type: object
+      required:
+      - group_id
+      title: GroupingGroupAdd
+    GuestPreviewOut:
+      properties:
+        guest_access:
+          type: boolean
+          title: Guest Access
+        method_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Method Id
+        has_password:
+          type: boolean
+          title: Has Password
+          default: false
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      required:
+      - guest_access
+      title: GuestPreviewOut
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    MemberAdd:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+      additionalProperties: false
+      type: object
+      required:
+      - user_id
+      title: MemberAdd
+      description: 'V3 (T2-GRP-003) — the client sends ONLY the user id. Provenance
+
+        (`component`/`item_id`) is server-set for manual adds; a client that still
+
+        posts those fields is rejected (`extra=''forbid''`) so forged provenance can
+
+        never reach the DB via HTTP. Only Yaman''s enrolment code writes enrol_*
+
+        rows, under the D-GM contract.'
+    MethodCreate:
+      properties:
+        method:
+          type: string
+          enum:
+          - manual
+          - self
+          - cohort
+          - guest
+          title: Method
+        status:
+          type: string
+          enum:
+          - enabled
+          - disabled
+          title: Status
+          default: enabled
+        default_role_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Default Role Id
+        cohort_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cohort Id
+        enrol_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Enrol Start
+        enrol_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Enrol End
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+      type: object
+      required:
+      - method
+      title: MethodCreate
+    MethodEnrolmentOut:
+      properties:
+        enrolment_id:
+          type: integer
+          title: Enrolment Id
+        user_id:
+          type: integer
+          title: User Id
+        full_name:
+          type: string
+          title: Full Name
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          title: Status
+        time_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time Start
+        time_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time End
+      type: object
+      required:
+      - enrolment_id
+      - user_id
+      - full_name
+      - status
+      - time_start
+      - time_end
+      title: MethodEnrolmentOut
+    MethodOut:
+      properties:
+        id:
+          type: integer
+          title: Id
+        method:
+          type: string
+          enum:
+          - manual
+          - self
+          - cohort
+          - guest
+          title: Method
+        status:
+          type: string
+          enum:
+          - enabled
+          - disabled
+          title: Status
+        default_role:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Default Role
+        cohort:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Cohort
+        enrol_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Enrol Start
+        enrol_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Enrol End
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        enrolled_count:
+          type: integer
+          title: Enrolled Count
+      type: object
+      required:
+      - id
+      - method
+      - status
+      - default_role
+      - cohort
+      - enrol_start
+      - enrol_end
+      - config
+      - enrolled_count
+      title: MethodOut
+    MethodPatch:
+      properties:
+        status:
+          anyOf:
+          - type: string
+            enum:
+            - enabled
+            - disabled
+          - type: 'null'
+          title: Status
+        default_role_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Default Role Id
+        enrol_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Enrol Start
+        enrol_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Enrol End
+        config:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Config
+      type: object
+      title: MethodPatch
+    OtherUserOut:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        full_name:
+          type: string
+          title: Full Name
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+        note:
+          type: string
+          title: Note
+      type: object
+      required:
+      - user_id
+      - full_name
+      - roles
+      - note
+      title: OtherUserOut
+    ParticipantOut:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        full_name:
+          type: string
+          title: Full Name
+        username:
+          type: string
+          title: Username
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+        paths:
+          items:
+            $ref: '#/components/schemas/PathOut'
+          type: array
+          title: Paths
+        enrolment_status:
+          type: string
+          enum:
+          - active
+          - suspended
+          - expired
+          - method_disabled
+          title: Enrolment Status
+        account_suspended:
+          type: boolean
+          title: Account Suspended
+        effective_status:
+          type: string
+          enum:
+          - active
+          - suspended
+          - expired
+          - method_disabled
+          - account_suspended
+          title: Effective Status
+        groups:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Groups
+        last_access:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Access
+      type: object
+      required:
+      - user_id
+      - full_name
+      - username
+      - roles
+      - paths
+      - enrolment_status
+      - account_suspended
+      - effective_status
+      - groups
+      - last_access
+      title: ParticipantOut
+    PathOut:
+      properties:
+        enrolment_id:
+          type: integer
+          title: Enrolment Id
+        method_id:
+          type: integer
+          title: Method Id
+        method:
+          type: string
+          enum:
+          - manual
+          - self
+          - cohort
+          - guest
+          title: Method
+        method_status:
+          type: string
+          enum:
+          - enabled
+          - disabled
+          title: Method Status
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          title: Status
+        time_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time Start
+        time_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time End
+        live:
+          type: boolean
+          title: Live
+        window_ok:
+          type: boolean
+          title: Window Ok
+      type: object
+      required:
+      - enrolment_id
+      - method_id
+      - method
+      - method_status
+      - status
+      - time_start
+      - time_end
+      - live
+      - window_ok
+      title: PathOut
+    RoleClone:
+      properties:
+        short_name:
+          type: string
+          title: Short Name
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+      type: object
+      required:
+      - short_name
+      - name
+      title: RoleClone
+    RoleCreate:
+      properties:
+        short_name:
+          type: string
+          title: Short Name
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+        archetype:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Archetype
+      type: object
+      required:
+      - short_name
+      - name
+      title: RoleCreate
+    RoleOut:
+      properties:
+        id:
+          type: integer
+          title: Id
+        short_name:
+          type: string
+          title: Short Name
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+        archetype:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Archetype
+        sort_order:
+          type: integer
+          title: Sort Order
+      type: object
+      required:
+      - id
+      - short_name
+      - name
+      - sort_order
+      title: RoleOut
+    SelfEnrolRequest:
+      properties:
+        user_id:
+          type: integer
+          title: User Id
+        key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Key
+      type: object
+      required:
+      - user_id
+      title: SelfEnrolRequest
+    SelfEnrolVerdict:
+      properties:
+        enrolled:
+          type: boolean
+          title: Enrolled
+        failing_gate:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Failing Gate
+        gates:
+          items:
+            $ref: '#/components/schemas/GateOut'
+          type: array
+          title: Gates
+        blocking_reasons:
+          items:
+            type: string
+          type: array
+          title: Blocking Reasons
+        method_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Method Id
+      type: object
+      required:
+      - enrolled
+      - failing_gate
+      - gates
+      - blocking_reasons
+      title: SelfEnrolVerdict
+    SetCapability:
+      properties:
+        context_id:
+          type: integer
+          title: Context Id
+        capability:
+          type: string
+          title: Capability
+        permission:
+          anyOf:
+          - type: string
+            enum:
+            - allow
+            - prevent
+            - prohibit
+          - type: 'null'
+          title: Permission
+      type: object
+      required:
+      - context_id
+      - capability
+      title: SetCapability
+    SyncResult:
+      properties:
+        added:
+          items:
+            type: integer
+          type: array
+          title: Added
+        removed:
+          items:
+            type: integer
+          type: array
+          title: Removed
+        kept:
+          items:
+            type: integer
+          type: array
+          title: Kept
+        skipped:
+          type: boolean
+          title: Skipped
+          default: false
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      required:
+      - added
+      - removed
+      - kept
+      title: SyncResult
+    UserPathOut:
+      properties:
+        course:
+          additionalProperties: true
+          type: object
+          title: Course
+        method_id:
+          type: integer
+          title: Method Id
+        method:
+          type: string
+          enum:
+          - manual
+          - self
+          - cohort
+          - guest
+          title: Method
+        method_status:
+          type: string
+          enum:
+          - enabled
+          - disabled
+          title: Method Status
+        status:
+          type: string
+          enum:
+          - active
+          - suspended
+          title: Status
+        time_start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time Start
+        time_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Time End
+        live:
+          type: boolean
+          title: Live
+      type: object
+      required:
+      - course
+      - method_id
+      - method
+      - method_status
+      - status
+      - time_start
+      - time_end
+      - live
+      title: UserPathOut
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer

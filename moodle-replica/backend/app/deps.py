@@ -40,6 +40,10 @@ async def current_user(x_acting_user: int | None = Header(default=None)) -> dict
     )
     if row is None or row["deleted"]:
         raise HTTPException(status_code=401, detail=f"unknown principal {x_acting_user}")
+    if row["suspended"]:
+        # Docstring promises "neither deleted nor suspended"; the guard omitted
+        # the suspended check, letting a suspended account reach every gated route.
+        raise HTTPException(status_code=403, detail=f"account {x_acting_user} is suspended")
     return row
 
 
@@ -53,18 +57,11 @@ async def require_capability(user_id: int, capability: str, context_id: int) -> 
         )
 
 
-_COURSE_CTX_CACHE: dict[int, int] = {}  # course→context is immutable
-
-
 async def course_context_id(course_id: int) -> int:
-    cached = _COURSE_CTX_CACHE.get(course_id)
-    if cached is not None:
-        return cached
     row = await db.fetch_one(
         "select id from context where level = 'course' and instance_id = $1",
         course_id,
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"no context for course {course_id}")
-    _COURSE_CTX_CACHE[course_id] = row["id"]
     return row["id"]

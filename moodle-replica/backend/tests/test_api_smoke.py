@@ -26,7 +26,10 @@ def _as_user(uid: int):
 
 
 def test_expected_routes_registered():
-    paths = {r.path for r in app.routes}
+    # Read from the OpenAPI schema, not app.routes: newer FastAPI nests included
+    # sub-routers under _IncludedRouter objects that expose no flat .path, so a
+    # direct app.routes scan misses them. The OpenAPI paths are version-stable.
+    paths = set(app.openapi()["paths"].keys())
     for expected in [
         "/api/permissions/check",
         "/api/permissions/decisions",
@@ -57,7 +60,14 @@ def test_check_endpoint_requires_authentication():
 def test_check_endpoint_wired_returns_503_without_db():
     # Authenticated (self-subject) but no DB → the endpoint is still wired down to
     # the DB layer, which answers a clean 503.
+    from app import db as _db
     cleanup = _as_user(3)
+    # Deterministic no-DB state: popping DATABASE_URL (module load) is not enough
+    # if another test module in the same session already established a pool —
+    # connect() with no URL is a no-op and leaves that pool in place. Force it.
+    saved_pool = _db._pool
+    saved_url = os.environ.pop("DATABASE_URL", None)
+    _db._pool = None
     try:
         with TestClient(app) as client:
             r = client.post(
@@ -67,6 +77,9 @@ def test_check_endpoint_wired_returns_503_without_db():
         assert r.status_code == 503
         assert "database" in r.text.lower()
     finally:
+        _db._pool = saved_pool
+        if saved_url is not None:
+            os.environ["DATABASE_URL"] = saved_url
         cleanup()
 
 

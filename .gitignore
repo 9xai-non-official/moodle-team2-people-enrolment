@@ -19,3 +19,7 @@ secrets.*
 *.key
 .vercel/
 .playwright-mcp/
+
+# local CD poller (scripts/local-cd.sh)
+.local-cd.log
+.local-cd.err

@@ -63,9 +63,9 @@ This reference consolidates **all 23 documents** that exist in the repository ac
 | 11 | `06_mahdi_team2_permissions.md` | Mahdi | Capability reference generated from the live install | Substantive reference |
 | 12 | `DATABASE_SCHEMA.md` | Auto-generated | Full Moodle DB schema: 490 tables, 4,468 columns, 611 logical FKs | Generated reference (13,091 lines) |
 | 13 | `notes/groups-groupings.md` | Mahmoud (reviewer: Yaman) | Groups findings: DB map, source map, first 4 GRP rules | In progress — 4 of ≥15 rules seeded |
-| 14 | `tasks/mahmoud-groups-groupings-task-guide.md` | Yaman (for Mahmoud) | The authoritative 23-section Groups & Groupings task guide | Complete guide |
-| 15 | `tasks/03_mahmoud_groups_testing.md` | (for Mahmoud) | Groups testing assignment: G-01–G-12 test cases, Hard Cases 3 & 4 | Complete assignment |
-| 16 | `tasks/04_mahdi_progress_testing.md` | (for Mahdi) | Progress testing assignment: P-01–P-14 test cases, Hard Case 5 | Complete assignment |
+| 14 | `tasks/day1-testing/03-mahmoud-groups-task-guide.md` | Yaman (for Mahmoud) | The authoritative 23-section Groups & Groupings task guide | Complete guide |
+| 15 | `tasks/day1-testing/03-mahmoud-groups.md` | (for Mahmoud) | Groups testing assignment: G-01–G-12 test cases, Hard Cases 3 & 4 | Complete assignment |
+| 16 | `tasks/day1-testing/04-mahdi-progress.md` | (for Mahdi) | Progress testing assignment: P-01–P-14 test cases, Hard Case 5 | Complete assignment |
 | 17 | `tests/hard-cases/README.md` | Team | The 5 hard cases as runnable-test specifications | Spec written; all 5 tests ⚪ not started |
 
 ### 1.2 Files only on branches `main` / `staging`
@@ -300,7 +300,7 @@ The complete guide quotes the suspension guard as protecting only *yourself and 
 | mysql client | `/Applications/MAMP/Library/bin/mysql80/bin/mysql` |
 | Table prefix | `mdl_` (confirmed from `config.php` — Q5 ✅) |
 | moodledata | `/Applications/MAMP/data/moodle503` |
-| DB helper | `./db.sh "SELECT …"` — reads credentials from `config.php` at runtime; no password in the repo (Q7 ✅) |
+| DB helper | `./scripts/db.sh "SELECT …"` — reads credentials from `config.php` at runtime; no password in the repo (Q7 ✅) |
 
 **Read the source at the path above, not a separately downloaded copy** — running and reading the same build keeps a genuine finding distinguishable from version drift.
 
@@ -1185,7 +1185,7 @@ Capability `enrol/manual:enrol` — ALLOW roles: editingteacher, manager, teache
 
 ## 10. Groups and Groupings
 
-*Sources: `notes/groups-groupings.md`, `tasks/mahmoud-groups-groupings-task-guide.md`, `mahdi's_conclusion.md` §3, complete guide Part E.*
+*Sources: `notes/groups-groupings.md`, `tasks/day1-testing/03-mahmoud-groups-task-guide.md`, `mahdi's_conclusion.md` §3, complete guide Part E.*
 
 ### 10.1 Group vs Grouping vs Cohort — settled by the schema
 
@@ -1981,7 +1981,7 @@ Pattern: Given (TA in Group A, student in Group B, Separate Groups, TA can grade
 
 ## 18. Cross-Team Interfaces (Teams 1 and 3)
 
-*Sources: `tasks/04_mahdi_progress_testing.md` §6, complete guide §73, source-analysis §§47–48, `open-questions.md` Q3.*
+*Sources: `tasks/day1-testing/04-mahdi-progress.md` §6, complete guide §73, source-analysis §§47–48, `open-questions.md` Q3.*
 
 **⏰ The contract must be frozen Wednesday, not Thursday** — the brief says leaving the connection to Thursday morning is what kills teams. Agree on user and course **identifiers** early: if they key on Moodle's internal ids and we key on something else, nothing connects (Q3).
 
@@ -2044,7 +2044,7 @@ Decision recorded 2026-07-20: running Moodle 5.3dev (`MATURITY_ALPHA`; GA not un
 ### 19.3 Answered
 
 - **✅ Q5 — Table prefix** → `mdl_` (from `config.php`, 2026-07-20). Still a per-install choice — re-check before trusting queries against the organiser's shared instance.
-- **✅ Q7 — DB access** → `./db.sh` wraps MAMP's non-standard port/client and reads credentials from `config.php` at runtime ([§3.7](#37-local-environments-both-instances--see-c-1)). Baseline recorded: 757 `mdl_capabilities` rows (see C-2), 8 default roles.
+- **✅ Q7 — DB access** → `./scripts/db.sh` wraps MAMP's non-standard port/client and reads credentials from `config.php` at runtime ([§3.7](#37-local-environments-both-instances--see-c-1)). Baseline recorded: 757 `mdl_capabilities` rows (see C-2), 8 default roles.
 
 ### 19.4 Per-owner open questions (cross-team, from the notes and guides)
 
@@ -2148,7 +2148,7 @@ The full task documents remain the operational checklists; everything material i
 
 ### 22.1 Mahmoud — Groups, Groupings, and Visibility (Hard Cases 3 & 4)
 
-*Sources: `tasks/mahmoud-groups-groupings-task-guide.md` (23 sections), `tasks/03_mahmoud_groups_testing.md`.*
+*Sources: `tasks/day1-testing/03-mahmoud-groups-task-guide.md` (23 sections), `tasks/day1-testing/03-mahmoud-groups.md`.*
 
 **Mission:** discover how Moodle uses Groups to organise or restrict access inside a course, and prove the difference:
 
@@ -2204,7 +2204,7 @@ Grouping "Assignment Groups" = {A, B}; C kept outside initially. Activities: Ass
 
 ### 22.2 Mahdi — Activity and Course Progress (Hard Case 5)
 
-*Source: `tasks/04_mahdi_progress_testing.md`.*
+*Source: `tasks/day1-testing/04-mahdi-progress.md`.*
 
 **Mission:** discover how Moodle decides a student has completed an activity or course. Do not reduce progress to one percentage — Moodle tracks viewing, submitting, grading, passing, manual completion, course criteria, recalculation, and historical records. Owns Hard Case 5 and defines the progress data needed from Teams 1 & 3.
 
@@ -2423,9 +2423,9 @@ Worked scenarios to trace (complete guide Part H): normal student · non-editing
 11. **`06_mahdi_team2_permissions.md`** — the capability reference reproduced in [§9](#9-permissions-capability-reference), including how to track any capability in UI/DB/code, and the four worked examples with the `role_allow_assign` catch.
 12. **`DATABASE_SCHEMA.md`** — auto-generated full-schema reference (490 tables / 4,468 columns / 611 logical FKs; no real DB-level foreign keys; conventions), organized as relations → tables-by-component → per-table details.
 13. **`notes/groups-groupings.md`** — Mahmoud's findings document: the 20-deliverable tracker, the group/grouping/cohort proof, the exact live schema columns, the grouplib source map with line numbers, rules GRP-001/002/006/012, open questions per teammate, honest limitations.
-14. **`tasks/mahmoud-groups-groupings-task-guide.md`** — Yaman's 23-section authoritative guide: mission, scope rule (20/80), core concepts, cohort/group/grouping comparison, full environment spec, baseline verification, evidence standard + rule template, DB tables and fields, read-only SQL templates, source-code investigation targets (incl. per-function documentation demands and assignment/forum/core-vs-plugin comparisons), experiments GRP-001–015, the three matrices, rule quotas and categories, hard cases 3 & 4 ownership split, questions for each teammate, the FastAPI model and API endpoints (incl. the group-access check example), suggested automated tests, the 4-day work order, the 20 deliverables, the quality gate, definition of done, and the final explanation.
-15. **`tasks/03_mahmoud_groups_testing.md`** — the compact testing assignment: controlled setup, concepts to distinguish, 10 questions, test cases G-01–G-12 (incl. Hard Cases 3 & 4 with the per-group outcome table), cross-activity comparison, DB and PHP investigation checklists, the rule template, and Mon/Tue/Wed deliverables incl. the Wednesday handoff list.
-16. **`tasks/04_mahdi_progress_testing.md`** — the progress testing assignment: setup, concepts, 10 questions, P-01–P-14 (incl. Hard Case 5), the cross-team integration requirements (Team 1 fields, Team 3 events, idempotency), DB and PHP investigation lists, the rule template, and deliverables incl. the Wednesday handoff.
+14. **`tasks/day1-testing/03-mahmoud-groups-task-guide.md`** — Yaman's 23-section authoritative guide: mission, scope rule (20/80), core concepts, cohort/group/grouping comparison, full environment spec, baseline verification, evidence standard + rule template, DB tables and fields, read-only SQL templates, source-code investigation targets (incl. per-function documentation demands and assignment/forum/core-vs-plugin comparisons), experiments GRP-001–015, the three matrices, rule quotas and categories, hard cases 3 & 4 ownership split, questions for each teammate, the FastAPI model and API endpoints (incl. the group-access check example), suggested automated tests, the 4-day work order, the 20 deliverables, the quality gate, definition of done, and the final explanation.
+15. **`tasks/day1-testing/03-mahmoud-groups.md`** — the compact testing assignment: controlled setup, concepts to distinguish, 10 questions, test cases G-01–G-12 (incl. Hard Cases 3 & 4 with the per-group outcome table), cross-activity comparison, DB and PHP investigation checklists, the rule template, and Mon/Tue/Wed deliverables incl. the Wednesday handoff list.
+16. **`tasks/day1-testing/04-mahdi-progress.md`** — the progress testing assignment: setup, concepts, 10 questions, P-01–P-14 (incl. Hard Case 5), the cross-team integration requirements (Team 1 fields, Team 3 events, idempotency), DB and PHP investigation lists, the rule template, and deliverables incl. the Wednesday handoff.
 17. **`tests/hard-cases/README.md`** — the five hard cases as test specifications with the "assert what Moodle actually does" philosophy and status table.
 18. **`07_mahdi_team2_database.md`** *(main/staging)* — the Team-2-scoped DB reference: 28 tables, the mermaid ER map, all 47 relations (declared vs implicit), and every column of every in-scope table with type/null/default/key/explanation from XMLDB comments.
 19. **`08_mahdi_team2_roles.md`** *(main/staging)* — the 9-role reference: what a role is, the role table with allow-cap counts and assignable contexts, role-by-role responsibilities and limits, the three allow-matrices, the Team 2 capability grid, the teacher1 cleanup recommendation, and verification instructions.

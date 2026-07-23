@@ -23,17 +23,20 @@ Cross-domain writes go through teammates' services only: group membership via
 app.services.groups (Mahmoud). Until his module lands the import is guarded and
 group side-effects are skipped with an explicit warning in the result payload.
 """
+import asyncio
 import json
 import inspect
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
+import asyncpg
+
 from app import db as _dbmod
 
 log = logging.getLogger("enrolment")
 
-try:  # Mahmoud's groups service — frozen contract in tasks/assignments/05 §3.
+try:  # Mahmoud's groups service — frozen contract in tasks/day2-build-assignments/05 §3.
     from app.services import groups as _groups
 except ImportError:  # pragma: no cover
     _groups = None
@@ -53,6 +56,12 @@ ACTIVE_CONDITIONS_SQL = """
 # CONTRACTS.md where they overlap; course_visible was missing there and is
 # gate #1 by spec.
 GATES = ("course_visible", "method_enabled", "window_open", "capacity", "key_match")
+
+# Distinguishes "caller omitted this field" from "caller explicitly passed
+# None". Needed because None is a meaningful value on a PATCH: it CLEARS the
+# column. Without it, an omitted field and a null are the same request and a
+# column can only ever be set, never unset.
+_UNSET = object()
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +154,74 @@ async def _method(dbx, method_id: int) -> dict | None:
     return await _one(dbx, "select * from enrolment_method where id = $1", method_id)
 
 
+# ---------------------------------------------------------------------------
+# Audit (D-AUDIT / T2-DATA-001) — ONE sink for this domain: append to audit_log.
+# The fixed columns (event, actor_id, affected_id, course_id, context_id) map
+# 1:1; every extended field (method_id, method kind, previous/new status,
+# last_path, expiry action, intended group op, provenance, failure reason,
+# reconciliation status) rides in `detail` jsonb. The M10 assessment froze the
+# audit_log shape as ADEQUATE, so nothing here needs a schema change.
+#
+# Placement rule (RETURN §"Transaction placement"): pass the TRANSACTION
+# connection so the audit row shares the mutation's commit/rollback — an atomic
+# lifecycle record. Only genuinely post-commit effects (deferred group
+# side-effects, which run on Mahmoud's own connections after our tx closes) are
+# audited on the module db, best-effort.
+# ---------------------------------------------------------------------------
+async def _audit(dbx, event, actor=None, affected=None, course=None,
+                 context=None, detail=None):
+    """Insert one audit_log row on `dbx`. When `dbx` is the transaction conn the
+    write is atomic with the mutation (it raises on failure so the mutation
+    rolls back with it); post-commit callers pass the module db and wrap this
+    best-effort."""
+    await _one(dbx, """
+        insert into audit_log
+            (event, actor_id, affected_id, course_id, context_id, detail)
+        values ($1, $2, $3, $4, $5, $6::jsonb)
+        returning id
+    """, event, actor, affected, course, context, json.dumps(detail or {}))
+
+
+def _group_op_affected(fn: str, args: tuple):
+    """The affected user id carried by a deferred group op, if any."""
+    if fn == "add_member" and len(args) >= 2:
+        return args[1]                       # (group_id, user_id, ...)
+    if fn in ("remove_members_by_provenance", "remove_all_memberships") and len(args) >= 2:
+        return args[1]                       # (course_id, user_id, ...)
+    return None
+
+
+async def _audit_group_ops(dbx, ops: list, results: list, *, actor=None,
+                           course=None, context=None) -> None:
+    """POST-COMMIT: record every deferred group side-effect that did not succeed
+    so it can be diagnosed and reconciled (Engineer 2's deferred-op flow). It
+    consumes whatever the groups service — or the not-merged-yet guard — returned
+    (ok / skipped / reason) and never lets an audit failure break the request:
+    the mutation has already committed and cannot be rolled back here."""
+    for (fn, args, kwargs), res in zip(ops, results):
+        res = res or {}
+        if res.get("ok"):
+            continue                          # succeeded — nothing to reconcile
+        skipped = bool(res.get("skipped"))
+        detail = {
+            "intended_group_op": fn,
+            "op_args": list(args),
+            "op_kwargs": kwargs,
+            "provenance": kwargs.get("component"),
+            "failure_reason": res.get("reason"),
+            "skipped": skipped,
+            # skipped = the op never ran (groups service unavailable) → replay
+            # when it lands; a hard failure needs manual repair.
+            "reconciliation": "pending" if skipped else "needs_repair",
+            "result": res,
+        }
+        try:
+            await _audit(dbx, "enrolment.group_op_failed", actor,
+                         _group_op_affected(fn, args), course, context, detail)
+        except Exception:  # pragma: no cover - audit is best-effort post-commit
+            log.exception("group-op audit write failed for %s%s", fn, args)
+
+
 # ===========================================================================
 # The six frozen signatures (task 01 §3)
 #
@@ -207,49 +284,6 @@ async def active_paths(db, user_id: int, course_id: int | None = None) -> list[d
     return rows
 
 
-# Same-course role integrity: within one course a participant is either a
-# LEARNER or STAFF, never both. Enrolling someone as a student in a course
-# where they already teach/manage (or vice versa) is a role conflict, not a
-# valid multi-role — Moodle allows a person to teach one course and learn
-# another, but not to be teacher AND student of the SAME course.
-_LEARNER_ROLES = {"student"}
-_STAFF_ROLES = {"manager", "editingteacher", "teacher", "teacher-allgroups",
-                "coursecreator"}
-
-
-def _role_class(short_name: str | None) -> str | None:
-    if short_name in _LEARNER_ROLES:
-        return "learner"
-    if short_name in _STAFF_ROLES:
-        return "staff"
-    return None  # guest / custom roles are unclassified — never conflict
-
-
-async def _role_conflict(conn, user_id: int, ctx: int,
-                         new_role_id: int) -> str | None:
-    """A reason string if giving `new_role_id` to the user at this course
-    context would put them on both sides of the learner/staff divide, else
-    None. Same-class (student↔student, teacher↔manager) never conflicts."""
-    new = await _one(conn, "select short_name from role where id = $1", new_role_id)
-    new_class = _role_class(new["short_name"]) if new else None
-    if new_class is None:
-        return None
-    held = await _all(conn, """
-        select distinct r.short_name
-          from role_assignment ra
-          join role r on r.id = ra.role_id
-         where ra.user_id = $1 and ra.context_id = $2
-    """, user_id, ctx)
-    for h in held:
-        hc = _role_class(h["short_name"])
-        if hc and hc != new_class:
-            return (f"role conflict: this user already holds '{h['short_name']}' "
-                    f"in this course, so they cannot also be assigned "
-                    f"'{new['short_name']}' — a course participant is staff or a "
-                    f"learner, not both")
-    return None
-
-
 async def enrol_user(db, method_id: int, user_id: int, *,
                      role_id: int | None = None,
                      time_start: datetime | None = None,
@@ -281,16 +315,11 @@ async def enrol_user(db, method_id: int, user_id: int, *,
             return {"ok": False,
                     "reason": "guest methods never create enrolment rows (§6.7)"}
 
-        # Same-course role-conflict guard: refuse BEFORE writing anything, so a
-        # rejected enrol leaves no enrolment or role row behind. Blocks e.g.
-        # enrolling a course's teacher/manager as a student (and vice versa).
-        _eff_role = role_id or method["default_role_id"]
-        if _eff_role is not None:
-            _ctx = await _course_context_id(conn, method["course_id"])
-            if _ctx is not None:
-                _conflict = await _role_conflict(conn, user_id, _ctx, _eff_role)
-                if _conflict:
-                    return {"ok": False, "reason": _conflict}
+        # Read prior state (read-only — no behaviour change) so audit can tell
+        # created from updated and record the previous status on re-enrol.
+        prev = await _one(conn,
+            "select status from enrolment where method_id = $1 and user_id = $2",
+            method_id, user_id)
 
         row = await _one(conn, """
             insert into enrolment (method_id, user_id, status, time_start,
@@ -311,10 +340,13 @@ async def enrol_user(db, method_id: int, user_id: int, *,
         result = {"ok": True, "enrolment": row, "role_assigned": None,
                   "group_added": None, "warnings": []}
 
+        # Course context id — hoisted so both the provenance role row and the
+        # audit record use the one value (same as before, computed once).
+        ctx = await _course_context_id(conn, method["course_id"])
+
         # Provenance role row (§6.5, D-1: even manual carries component).
         effective_role = role_id or method["default_role_id"]
         if effective_role is not None:
-            ctx = await _course_context_id(conn, method["course_id"])
             if ctx is None:
                 result["warnings"].append(
                     f"no course context for course {method['course_id']} — "
@@ -339,9 +371,27 @@ async def enrol_user(db, method_id: int, user_id: int, *,
             ops.append(("add_member", (sync_group_id, user_id),
                         {"component": "enrol_cohort", "item_id": method_id}))
 
+        # --- audit, INSIDE the tx so it commits/rolls back with the enrolment.
+        await _audit(conn,
+                     "enrolment.created" if prev is None else "enrolment.updated",
+                     actor_id, user_id, method["course_id"], ctx, {
+                         "method_id": method_id, "method_kind": method["method"],
+                         "previous_status": (prev or {}).get("status"),
+                         "new_status": row["status"],
+                         "role_assigned": result["role_assigned"]})
+        assigned = result["role_assigned"]
+        if assigned and assigned["created"]:
+            await _audit(conn, "role.assigned", actor_id, user_id,
+                         method["course_id"], ctx, {
+                             "role_id": assigned["role_id"],
+                             "component": assigned["component"],
+                             "item_id": method_id, "provenance": "enrolment"})
+
     if _group_ops is None:                    # top-level call: tx committed here
         done = await _run_group_ops(ops)
         result["group_added"] = done[0] if done else None
+        await _audit_group_ops(db, ops, done, actor=actor_id,
+                               course=method["course_id"], context=ctx)
     elif ops:
         result["group_added"] = {"deferred": True}
     return result
@@ -430,11 +480,28 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             # rows (Hard Case #2), submissions, grades, and role_assignment
             # rows with component='' (Khaled's — never touch).
 
+        # --- audit, INSIDE the tx (atomic with the deletes). `last_path` records
+        # whether THIS was the final path (triggering whole-course cleanup);
+        # `removed_path` names the method/provenance that went.
+        await _audit(conn, "enrolment.deleted", actor_id, user_id, course_id, ctx, {
+            "method_id": method_id, "method_kind": method["method"],
+            "removed_path": {"method_id": method_id, "component": component},
+            "last_path": result["last_path_cleanup"],
+            "roles_removed": result["roles_removed"]})
+        if result["roles_removed"]:
+            await _audit(conn, "role.unassigned", actor_id, user_id, course_id, ctx, {
+                "roles_removed": result["roles_removed"],
+                "component": component, "item_id": method_id,
+                "provenance": "enrolment",
+                "included_last_path_leftovers": result["last_path_cleanup"]})
+
     if _group_ops is None:                    # top-level call: tx committed here
         done = await _run_group_ops(ops)
         result["groups_removed"] = done[0] if done else None
         if result["last_path_cleanup"] and len(done) > 1:
             result["all_memberships_removed"] = done[1]
+        await _audit_group_ops(db, ops, done, actor=actor_id,
+                               course=course_id, context=ctx)
     elif ops:
         result["groups_removed"] = {"deferred": True}
     return result
@@ -452,19 +519,35 @@ async def reactivate(db, method_id: int, user_id: int) -> dict:
 
 async def _set_status(db, method_id: int, user_id: int, status: str) -> dict:
     """Change-gated (ENR-010): a no-op flip returns the row untouched instead
-    of rewriting it — updated_at only moves when the status actually moved."""
-    current = await _one(db, """
-        select * from enrolment where method_id = $1 and user_id = $2
-    """, method_id, user_id)
-    if current is None:
-        return {"ok": False, "reason": "user is not enrolled via this method"}
-    if current["status"] == status:
-        return {"ok": True, "enrolment": current, "changed": False}
-    row = await _one(db, """
-        update enrolment set status = $3, updated_at = now()
-         where method_id = $1 and user_id = $2
-        returning *
-    """, method_id, user_id, status)
+    of rewriting it — updated_at only moves when the status actually moved.
+
+    Audit (T2-DATA-001): on a REAL flip, one enrolment.suspended|reactivated row
+    is written INSIDE the same transaction as the UPDATE (atomic). A no-op writes
+    nothing — the service's own change-gate is what makes 'skip audit on no-op'
+    correct here (no false lifecycle event)."""
+    event = "enrolment.suspended" if status == "suspended" else "enrolment.reactivated"
+    async with _tx(db) as conn:
+        current = await _one(conn, """
+            select * from enrolment where method_id = $1 and user_id = $2
+        """, method_id, user_id)
+        if current is None:
+            return {"ok": False, "reason": "user is not enrolled via this method"}
+        if current["status"] == status:
+            return {"ok": True, "enrolment": current, "changed": False}
+        row = await _one(conn, """
+            update enrolment set status = $3, updated_at = now()
+             where method_id = $1 and user_id = $2
+            returning *
+        """, method_id, user_id, status)
+        method = await _method(conn, method_id)
+        course_id = method["course_id"] if method else None
+        ctx = await _course_context_id(conn, course_id) if course_id else None
+        # actor: suspend()/reactivate() carry no actor_id in the frozen signature
+        # → documented system/unknown actor (None). See handoff.
+        await _audit(conn, event, None, user_id, course_id, ctx, {
+            "method_id": method_id,
+            "method_kind": method["method"] if method else None,
+            "previous_status": current["status"], "new_status": status})
     return {"ok": True, "enrolment": row, "changed": True}
 
 
@@ -563,6 +646,8 @@ async def self_enrol(db, course_id: int, user_id: int,
 
     # tx committed — group placement can now see the new enrolment row.
     done = await _run_group_ops(ops)
+    await _audit_group_ops(db, ops, done, actor=user_id, course=course_id,
+                           context=await _course_context_id(db, course_id))
     return verdict(enrolled=True, method_id=method["id"],
                    enrolment=result["enrolment"],
                    group_joined=done[-1] if matched_group else None)
@@ -618,8 +703,22 @@ async def sync_cohort_method(db, method_id: int, *,
                                _cohort_sync=True, _group_ops=ops)
             removed.append(uid)
 
+        # Per-member created/deleted/reactivated rows were already audited by the
+        # nested enrol_user/unenrol_user/reactivate calls above (in THIS tx). One
+        # summary row records the reconcile as a whole (§6.8), in-tx.
+        ctx = await _course_context_id(conn, method["course_id"])
+        await _audit(conn, "enrolment.synced", actor_id, None,
+                     method["course_id"], ctx, {
+                         "method_id": method_id, "method_kind": "cohort",
+                         "cohort_id": method["cohort_id"],
+                         "added": added, "removed": removed, "kept": kept,
+                         "counts": {"added": len(added), "removed": len(removed),
+                                    "kept": len(kept)}})
+
     # tx committed — run the accumulated group side-effects.
-    await _run_group_ops(ops)
+    done = await _run_group_ops(ops)
+    await _audit_group_ops(db, ops, done, actor=actor_id,
+                           course=method["course_id"], context=ctx)
     return {"ok": True, "added": added, "removed": removed, "kept": kept}
 
 
@@ -639,6 +738,89 @@ async def sync_methods_for_cohort(db, cohort_id: int, *,
 
 
 # ===========================================================================
+# Group side-effect reconciliation (task/enrol_expiry entry point)
+#
+# Why this exists: enrol_user / sync_cohort_method place cohort members into
+# their sync group AFTER the enrolment transaction commits (_run_group_ops —
+# the groups service uses its own connections and can't see our uncommitted
+# rows). A groups-service outage during that post-commit window leaves the
+# enrolment row present but the group_member row missing; a lost unenrol op
+# leaves a stale group_member row after the path is gone. This pass rebuilds
+# the DESIRED state from the enrolment tables and re-issues the SAME groups.py
+# calls the live path uses (via _run_group_ops) — it owns NO group logic of
+# its own, and it is idempotent: add_member is on-conflict-do-nothing and
+# remove_members_by_provenance is a delete, so repeated runs converge.
+#
+# Scope: only the cohort sync-group STANDING rule (member ⇒ in sync group with
+# component 'enrol_cohort') is reconstructable from state. Self-enrol group-key
+# joins are one-time key events, not derivable from standing state, so they are
+# deliberately out of scope. Suspended members KEEP their membership (§6.5:
+# groups stay on suspend), so they are neither added nor removed.
+# ===========================================================================
+
+async def reconcile_group_side_effects(db) -> dict:
+    """Repair drift between enrolment truth and cohort sync-group memberships.
+
+    Idempotent and convergent: on a clean system it finds no diff and issues
+    no ops. Safe to call on every scheduled tick from app/tasks/enrol_expiry.
+    Degrades loudly if the groups service is not merged (see _groups_call)."""
+    methods = await _all(db, """
+        select id, course_id, config from enrolment_method
+         where method = 'cohort' and status = 'enabled'
+         order by id
+    """)
+
+    ops: list = []
+    added: list = []
+    removed: list = []
+    reconciled_methods = 0
+
+    for m in methods:
+        sync_group_id = _cfg(m["config"]).get("sync_group_id")
+        if not sync_group_id:
+            continue
+        reconciled_methods += 1
+
+        # Members that SHOULD be in the sync group = the live (active) ones,
+        # exactly what add_member's enrolment guard would accept.
+        active_members = {r["user_id"] for r in await _all(db, f"""
+            select e.user_id
+              from enrolment e
+              join enrolment_method m on m.id = e.method_id
+             where e.method_id = $1 and {ACTIVE_CONDITIONS_SQL}
+        """, m["id"])}
+        # Any enrolment row via this method (any status) — a group row is
+        # legitimate as long as SOME path row still exists (suspended stays).
+        path_users = {r["user_id"] for r in await _all(db,
+            "select user_id from enrolment where method_id = $1", m["id"])}
+        # Group rows this method's provenance currently owns.
+        current = {r["user_id"] for r in await _all(db, """
+            select user_id from group_member
+             where group_id = $1 and component = 'enrol_cohort' and item_id = $2
+        """, sync_group_id, m["id"])}
+
+        for uid in sorted(active_members - current):        # missing add
+            ops.append(("add_member", (sync_group_id, uid),
+                        {"component": "enrol_cohort", "item_id": m["id"]}))
+            added.append({"method_id": m["id"], "group_id": sync_group_id,
+                          "user_id": uid})
+        for uid in sorted(current - path_users):            # stale remove
+            ops.append(("remove_members_by_provenance",
+                        (m["course_id"], uid, "enrol_cohort", m["id"]), {}))
+            removed.append({"method_id": m["id"], "course_id": m["course_id"],
+                            "user_id": uid})
+
+    results = await _run_group_ops(ops)
+    groups_available = not any(
+        isinstance(r, dict) and r.get("skipped") for r in results)
+    return {"ok": True,
+            "reconciled_methods": reconciled_methods,
+            "added": added, "removed": removed,
+            "ops": len(ops),
+            "groups_available": groups_available}
+
+
+# ===========================================================================
 # Methods (instances), guest, last access
 # ===========================================================================
 
@@ -649,49 +831,101 @@ async def create_method(db, course_id: int, method: str, *,
                         enrol_start=None, enrol_end=None,
                         config: dict | None = None) -> dict:
     """Create one method instance. Multiple instances of the same kind are
-    legal; guest is one-per-course — the deployed DB has no partial unique
-    index for it, so the rule is enforced HERE (§6.3)."""
-    async with _tx(db) as conn:
-        if method == "guest":
-            existing = await _one(conn, """
-                select 1 from enrolment_method
-                 where course_id = $1 and method = 'guest' limit 1
-            """, course_id)
-            if existing:
-                return {"ok": False,
-                        "reason": "a guest method already exists on this course "
-                                  "(one per course — code-enforced)"}
-        if method == "cohort" and cohort_id is None:
-            return {"ok": False, "reason": "cohort methods require cohort_id"}
-        row = await _one(conn, """
-            insert into enrolment_method
-                (course_id, method, status, default_role_id, cohort_id,
-                 enrol_start, enrol_end, config)
-            values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-            returning *
-        """, course_id, method, status, default_role_id, cohort_id,
-            enrol_start, enrol_end, json.dumps(config or {}))
-        return {"ok": True, "method": row}
+    legal; guest is one-per-course (§6.3).
+
+    Two layers enforce the guest rule, and they are NOT redundant:
+      1. The pre-check below turns the common (uncontended) duplicate into a
+         friendly reason without hitting the constraint.
+      2. The D-GUEST partial unique index (migration M08:
+         `unique (course_id) where method = 'guest'`) is the CORRECTNESS
+         guarantee. Under concurrency two callers can both pass the pre-check,
+         but only one INSERT survives — the loser trips the index and we
+         translate that UniqueViolationError into a typed 409 reason here,
+         which flows out through the router's _ok(..., 409) path.
+    No SELECT FOR UPDATE / advisory lock: the unique index already serialises
+    the write, so extra locking would be redundant."""
+    if method == "cohort" and cohort_id is None:
+        return {"ok": False, "reason": "cohort methods require cohort_id"}
+    try:
+        async with _tx(db) as conn:
+            if method == "guest":
+                existing = await _one(conn, """
+                    select 1 from enrolment_method
+                     where course_id = $1 and method = 'guest' limit 1
+                """, course_id)
+                if existing:
+                    return {"ok": False,
+                            "reason": "a guest method already exists on this "
+                                      "course (one per course)"}
+            row = await _one(conn, """
+                insert into enrolment_method
+                    (course_id, method, status, default_role_id, cohort_id,
+                     enrol_start, enrol_end, config)
+                values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                returning *
+            """, course_id, method, status, default_role_id, cohort_id,
+                enrol_start, enrol_end, json.dumps(config or {}))
+            return {"ok": True, "method": row}
+    except asyncpg.UniqueViolationError:
+        # Lost a concurrent guest-creation race: the D-GUEST unique index
+        # (M08) rejected the second row. The transaction has rolled back;
+        # surface it as a friendly 409 rather than a 500 (errors.py would also
+        # map it, but routing it through the service keeps the reason uniform).
+        return {"ok": False,
+                "reason": "a guest method already exists on this course "
+                          "(one per course — enforced by the D-GUEST unique "
+                          "index)"}
 
 
-async def update_method(db, method_id: int, *, status: str | None = None,
-                        default_role_id: int | None = None,
-                        enrol_start=None, enrol_end=None,
-                        config: dict | None = None) -> dict:
+async def update_method(db, method_id: int, *, status=_UNSET,
+                        default_role_id=_UNSET,
+                        enrol_start=_UNSET, enrol_end=_UNSET,
+                        config=_UNSET) -> dict:
     """Enable / disable / configure. Disabling FREEZES every enrolment through
-    this instance (they fail condition 2) without touching their rows (§6.2)."""
-    row = await _one(db, """
+    this instance (they fail condition 2) without touching their rows (§6.2).
+
+    Only the fields the caller actually passes are written. That distinction
+    matters: this used to build `enrol_start = coalesce($4, enrol_start)`, so a
+    NULL meant "leave it alone" and an enrolment window, once set, could never
+    be cleared through the API — PATCH returned 200 and silently changed
+    nothing. Omitting a field still means "leave it"; passing None now means
+    "clear it".
+
+    Callers that pass a subset of kwargs are unaffected. The router passes
+    `model_dump(exclude_unset=True)`, so an absent JSON key and an explicit
+    null are no longer the same request.
+    """
+    sets, args = [], [method_id]
+
+    def assign(column, value):
+        args.append(value)
+        sets.append(f"{column} = ${len(args)}")
+
+    if status is not _UNSET:
+        assign("status", status)
+    if default_role_id is not _UNSET:
+        assign("default_role_id", default_role_id)
+    if enrol_start is not _UNSET:
+        assign("enrol_start", enrol_start)
+    if enrol_end is not _UNSET:
+        assign("enrol_end", enrol_end)
+    if config is not _UNSET:
+        args.append(json.dumps(config) if config is not None else None)
+        sets.append(f"config = ${len(args)}::jsonb")
+
+    if not sets:                       # nothing asked for — report current row
+        row = await _one(db, "select * from enrolment_method where id = $1",
+                         method_id)
+        return ({"ok": True, "method": row} if row else
+                {"ok": False, "reason": f"method {method_id} not found"})
+
+    sets.append("updated_at = now()")
+    row = await _one(db, f"""
         update enrolment_method
-           set status          = coalesce($2, status),
-               default_role_id = coalesce($3, default_role_id),
-               enrol_start     = coalesce($4, enrol_start),
-               enrol_end       = coalesce($5, enrol_end),
-               config          = coalesce($6::jsonb, config),
-               updated_at      = now()
+           set {', '.join(sets)}
          where id = $1
         returning *
-    """, method_id, status, default_role_id, enrol_start, enrol_end,
-        json.dumps(config) if config is not None else None)
+    """, *args)
     if row is None:
         return {"ok": False, "reason": f"method {method_id} not found"}
     return {"ok": True, "method": row}
