@@ -24,6 +24,7 @@ import { useSelectedCourse } from "../context/SelectedCourse";
 import { useLang } from "../context/Lang";
 import { useSession } from "../context/Session";
 import { coursePresentation } from "../lib/coursePresentation";
+import { fetchOverview } from "../lib/progressApi";
 import CourseArt from "../components/lms/CourseArt";
 import AssignmentPanel from "../components/lms/AssignmentPanel";
 import QuizPanel from "../components/lms/QuizPanel";
@@ -576,8 +577,15 @@ export default function CatalogPage() {
       .then((data) => { if (seq === loadSeq.current) setRows(Array.isArray(data) ? data : []); })
       .catch((e) => { if (seq === loadSeq.current) setError(e); });
     // Progress is secondary — never block the catalog on it.
-    apiGet(`/api/progress/users/${actingUser.id}/overview`)
-      .then((list) => {
+    //
+    // Go through lib/progressApi.fetchOverview, NOT a bare apiGet. The contract
+    // path /api/progress/users/{id}/overview does not exist on the live backend
+    // (it ships /api/progress/user/{id}, different path AND shape) — so calling
+    // it directly 404s, the .catch() below blanks the map, and every course card
+    // silently loses its progress bar. fetchOverview owns that fallback and the
+    // shape mapping in one place; MyProgress already used it.
+    fetchOverview(actingUser.id)
+      .then(({ rows: list }) => {
         if (seq !== loadSeq.current) return;
         const map = {};
         for (const r of list ?? []) map[r.course?.id ?? r.course_id] = { percent: r.percent, completed_at: r.completed_at };

@@ -12,12 +12,49 @@ import { apiGet, apiPost, apiPatch, apiDelete } from "../api";
 
 const is404 = (e) => e.status === 404;
 
-export async function fetchGroupsBoard(courseId) {
-  try {
-    return await apiGet(`/api/groups/courses/${courseId}/groups`);
-  } catch (e) {
-    if (!is404(e)) throw e;
+// Remember which contract paths turned out to be absent, so each is probed ONCE
+// per session rather than on every call. The fallbacks below already work; what
+// this removes is the stream of red 404s they leave in the console (the Groups
+// board alone fired several per visit), which during a demo reads as a broken
+// app rather than a documented fallback doing its job.
+//
+// Keyed per path TEMPLATE, not per URL — course 2 and course 3 share a verdict,
+// but /groups and /groupings do not, so a backend that implements some contract
+// routes and not others still resolves each one correctly.
+const absentContractPaths = new Set();
+
+// In-flight probes, keyed by full URL. Two components mounting together (the
+// groups board and the group picker both want course 2) would otherwise each
+// fire their own doomed request before either 404 came back, so the memo above
+// never got the chance to help. Keyed by URL and not by template, so a probe for
+// course 2 can never hand its result to a caller asking about course 3.
+const inflight = new Map();
+
+// Try a contract path, remembering a 404 so we skip it next time.
+// Returns { hit: true, value } or { hit: false } for the caller to fall back on.
+async function tryContract(key, url, fn) {
+  if (absentContractPaths.has(key)) return { hit: false };
+  let p = inflight.get(url);
+  if (!p) {
+    p = (async () => {
+      try {
+        return { hit: true, value: await fn() };
+      } catch (e) {
+        if (!is404(e)) throw e;
+        absentContractPaths.add(key);
+        return { hit: false };
+      } finally {
+        inflight.delete(url);
+      }
+    })();
+    inflight.set(url, p);
   }
+  return p;
+}
+
+export async function fetchGroupsBoard(courseId) {
+  const c = await tryContract("groups", `/api/groups/courses/${courseId}/groups`, () => apiGet(`/api/groups/courses/${courseId}/groups`));
+  if (c.hit) return c.value;
   const groups = await apiGet(`/api/groups?course_id=${courseId}`);
   return Promise.all(
     groups.map(async (g) => {
@@ -42,22 +79,15 @@ export async function fetchGroupsBoard(courseId) {
 // filter) — same contract-path-then-live-fallback seam as above, but without
 // the per-group member fetch a full board needs.
 export async function fetchCourseGroupOptions(courseId) {
-  try {
-    const list = await apiGet(`/api/groups/courses/${courseId}/groups`);
-    return Array.isArray(list) ? list.map((g) => ({ id: g.id, name: g.name })) : [];
-  } catch (e) {
-    if (!is404(e)) throw e;
-  }
+  const c = await tryContract("groups", `/api/groups/courses/${courseId}/groups`, () => apiGet(`/api/groups/courses/${courseId}/groups`));
+  if (c.hit) return Array.isArray(c.value) ? c.value.map((g) => ({ id: g.id, name: g.name })) : [];
   const groups = await apiGet(`/api/groups?course_id=${courseId}`);
   return Array.isArray(groups) ? groups.map((g) => ({ id: g.id, name: g.name })) : [];
 }
 
 export async function fetchGroupings(courseId) {
-  try {
-    return await apiGet(`/api/groups/courses/${courseId}/groupings`);
-  } catch (e) {
-    if (!is404(e)) throw e;
-  }
+  const c = await tryContract("groupings", `/api/groups/courses/${courseId}/groupings`, () => apiGet(`/api/groups/courses/${courseId}/groupings`));
+  if (c.hit) return c.value;
   const [groupings, groups] = await Promise.all([
     apiGet(`/api/groups/groupings?course_id=${courseId}`),
     apiGet(`/api/groups?course_id=${courseId}`),
@@ -71,11 +101,9 @@ export async function fetchGroupings(courseId) {
 }
 
 export async function fetchActivityPolicies(courseId) {
-  try {
-    return await apiGet(`/api/groups/courses/${courseId}/activity-policies`);
-  } catch (e) {
-    if (!is404(e)) throw e;
-  }
+  const c = await tryContract("activity-policies", `/api/groups/courses/${courseId}/activity-policies`, () =>
+    apiGet(`/api/groups/courses/${courseId}/activity-policies`));
+  if (c.hit) return c.value;
   const activities = await apiGet(`/api/courses/${courseId}/activities`);
   return Promise.all(
     activities.map(async (a) => {

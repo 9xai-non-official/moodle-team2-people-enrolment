@@ -15,12 +15,24 @@
 //   surfaced as `manual_completable` so MyProgress can show the button.
 import { apiGet } from "../api";
 
+// Remember whether the contract path exists, so we probe it ONCE per session
+// instead of on every mount. Without this, each page load fires a doomed
+// request that shows up as a red 404 in the console — three of them on a single
+// Courses visit — which reads as "the app is broken" during a demo when it is
+// actually the documented fallback working exactly as designed.
+// null = not yet probed, true/false = known.
+let contractPathExists = null;
+
 export async function fetchOverview(userId) {
-  try {
-    const rows = await apiGet(`/api/progress/users/${userId}/overview`);
-    return { rows, source: "contract" };
-  } catch (e) {
-    if (e.status !== 404) throw e;
+  if (contractPathExists !== false) {
+    try {
+      const rows = await apiGet(`/api/progress/users/${userId}/overview`);
+      contractPathExists = true;
+      return { rows, source: "contract" };
+    } catch (e) {
+      if (e.status !== 404) throw e;
+      contractPathExists = false;
+    }
   }
   const live = await apiGet(`/api/progress/user/${userId}`);
   return {
