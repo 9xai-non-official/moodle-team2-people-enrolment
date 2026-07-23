@@ -33,7 +33,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app import db
 from app.deps import current_user
-from app.services import permissions
+from app.services import permissions, plugin_core
 
 router = APIRouter()
 
@@ -202,6 +202,11 @@ async def create_course(body: dict = Body(default=None),
             "default_role_id) values ($1, 'manual', 'enabled', $2)",
             row["id"], student_role,
         )
+        # Plugin outbox — INSIDE the tx (unlike _audit_safe below) so the
+        # event exists iff the course committed.
+        await plugin_core.emit(conn, "course.created", {
+            "course_id": row["id"], "short_name": short_name,
+            "full_name": full_name, "actor_id": principal["id"]})
     row = dict(row)
     await _audit_safe("course.created", actor_id=principal["id"],
                       course_id=row["id"],
@@ -515,7 +520,10 @@ async def delete_course(course_id: int,
     if not row:
         raise HTTPException(status_code=404,
                             detail=f"course {course_id} not found or already deleted")
-    await db.fetch_one("update course set deleted_at = now() where id = $1 returning id",
-                       course_id)
+    async with db.transaction() as conn:
+        await conn.execute("update course set deleted_at = now() where id = $1",
+                           course_id)
+        await plugin_core.emit(conn, "course.deleted", {
+            "course_id": course_id, "actor_id": principal["id"]})
     await _audit_safe("course.deleted", actor_id=principal["id"], course_id=course_id, detail={})
     return {"ok": True, "deleted": True, "course_id": course_id}

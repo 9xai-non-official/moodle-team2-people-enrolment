@@ -5,6 +5,9 @@ A minimal, runnable API scaffold around Moodle's core "people & enrolment"
 concepts. Endpoints are stubs that return placeholder data so the frontend
 has something to talk to; fill in real logic + a database later.
 """
+import asyncio
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,14 +16,57 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import db, errors
 from app.routers import users, courses, enrolment, roles, groups, progress
 from app.routers import permissions, auth, progress_report
+from app.routers import plugins as plugins_router
+from app.routers import realtime as realtime_router
 from app.routers.lms import router as lms_router
+from app.plugins.msteams import router as msteams_router
+from app.services import plugin_core
+
+
+async def _plugin_dispatch_loop():
+    """Local-dev outbox pump. On Vercel the post-response middleware plus the
+    pg_cron sweep cover dispatch; a long-lived loop can't exist there."""
+    while True:
+        try:
+            await plugin_core.dispatch_pending()
+        except Exception:
+            logging.getLogger("plugins").exception("dispatch loop failed")
+        await asyncio.sleep(10)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
+    loop_task = None
+    if not os.environ.get("VERCEL") and \
+            os.environ.get("PLUGIN_DISPATCH_LOOP", "1") != "0":
+        loop_task = asyncio.create_task(_plugin_dispatch_loop())
     yield
+    if loop_task:
+        loop_task.cancel()
     await db.disconnect()
+
+
+class PluginDispatchMiddleware:
+    """Post-response outbox dispatch — pure ASGI (not BaseHTTPMiddleware) so
+    it runs after the response is flushed but before the ASGI callable
+    returns: the client never waits on plugin handlers, yet on Vercel the
+    invocation is still alive (Fluid Compute). Latency optimization only —
+    the pg_cron-driven /api/plugins/dispatch sweep is the correctness
+    guarantee. Empty queue costs one indexed SELECT."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        await self.app(scope, receive, send)
+        if scope["type"] == "http" and \
+                scope.get("method") not in ("GET", "HEAD", "OPTIONS", None):
+            try:
+                await plugin_core.dispatch_pending()
+            except Exception:
+                logging.getLogger("plugins").exception(
+                    "post-response dispatch failed")
 
 
 app = FastAPI(
@@ -32,6 +78,8 @@ app = FastAPI(
 
 # Allow the Vite dev server (localhost:5173) during development, plus the
 # deployed frontend on Vercel (any *.vercel.app preview/prod of this team).
+app.add_middleware(PluginDispatchMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -102,3 +150,6 @@ app.include_router(progress_report.router)
 app.include_router(permissions.router)
 app.include_router(auth.router)
 app.include_router(lms_router)
+app.include_router(plugins_router.router)
+app.include_router(realtime_router.router)
+app.include_router(msteams_router.router)

@@ -18,6 +18,10 @@ from urllib.parse import urlparse
 import asyncpg
 from dotenv import load_dotenv
 
+# .env is TRACKED in git (shared dev DATABASE_URL, af000e0) — real secrets
+# (ABLY_API_KEY, PLUGIN_DISPATCH_TOKEN, ...) go in the untracked .env.local,
+# loaded first so its values win (load_dotenv never overrides what's set).
+load_dotenv(".env.local")
 load_dotenv()
 
 _pool: asyncpg.Pool | None = None

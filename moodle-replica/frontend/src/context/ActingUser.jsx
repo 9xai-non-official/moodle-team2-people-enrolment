@@ -4,6 +4,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { cachedGet } from "../lib/catalog";
 import { setApiActingUser } from "../api";
+import { resetRealtime } from "../lib/realtime";
 
 const ActingUserContext = createContext({
   users: [],
@@ -34,6 +35,12 @@ export function ActingUserProvider({ children }) {
 
   const actingUser = users.find((u) => u.id === actingUserId) || null;
   setApiActingUser(actingUser?.id ?? null); // keep the API principal header in sync
+
+  // Realtime tokens carry the acting user's identity — drop the connection
+  // on switch so the next subscribe reconnects as the new principal.
+  useEffect(() => {
+    resetRealtime();
+  }, [actingUserId]);
 
   return (
     <ActingUserContext.Provider

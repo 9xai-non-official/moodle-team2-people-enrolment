@@ -23,6 +23,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app import db
 from app.deps import current_user
 from app.services import enrolment as enrol_svc
+from app.services import plugin_core
 
 router = APIRouter()
 
@@ -198,6 +199,11 @@ async def decide_course_request(
             "requested_at, decided_by",
             principal["id"], course["id"], request_id,
         )
+        # Plugin outbox — same event as the direct-create path so both
+        # routes yield an identically provisioned course.
+        await plugin_core.emit(conn, "course.created", {
+            "course_id": course["id"], "short_name": course["short_name"],
+            "full_name": course["full_name"], "actor_id": principal["id"]})
     result = dict(updated)
     result["course"] = dict(course)
     return result

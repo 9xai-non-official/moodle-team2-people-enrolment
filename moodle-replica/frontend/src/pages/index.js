@@ -10,6 +10,7 @@ import RolesPage from "./RolesPage";
 import GroupsPage from "./GroupsPage";
 import MyGroupsPage from "./MyGroupsPage";
 import ProgressPage from "./ProgressPage";
+import PluginsPage from "./PluginsPage";
 
 export const PAGES = {
   Dashboard: DashboardPage,
@@ -21,6 +22,7 @@ export const PAGES = {
   Groups: GroupsPage,
   "My Groups": MyGroupsPage,
   Progress: ProgressPage,
+  Plugins: PluginsPage,
 };
 
 export const NAV_ITEMS = Object.keys(PAGES);
@@ -29,10 +31,11 @@ export function navFor(session) {
   // "Groups" is manager tooling (group:manage); "My Groups" is the read-only
   // student window. Non-students already have the manager page, so drop the
   // duplicate for them.
+  // "Plugins" is site-admin tooling (plugin:manage) — hidden from teachers.
   if (!session || session.mode === "explore" || session.is_admin)
     return NAV_ITEMS.filter((p) => p !== "My Groups");
   if (session.teaches?.length)
-    return NAV_ITEMS.filter((p) => p !== "My Groups"); // teachers use the admin views
+    return NAV_ITEMS.filter((p) => p !== "My Groups" && p !== "Plugins"); // teachers use the admin views
   return ["Dashboard", "Courses", "My Groups", "Progress"]; // student: their world only
 }
 

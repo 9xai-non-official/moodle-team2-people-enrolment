@@ -33,6 +33,7 @@ from datetime import datetime
 import asyncpg
 
 from app import db as _dbmod
+from app.services import plugin_core
 
 log = logging.getLogger("enrolment")
 
@@ -379,6 +380,13 @@ async def enrol_user(db, method_id: int, user_id: int, *,
                          "previous_status": (prev or {}).get("status"),
                          "new_status": row["status"],
                          "role_assigned": result["role_assigned"]})
+        # Plugin outbox — only a NEW path is a membership change (a re-enrol
+        # updates the row, §ENR-010); all enrolment paths route through here
+        # so this one emit covers manual/self/cohort/course-level.
+        if prev is None:
+            await plugin_core.emit(conn, "enrolment.created", {
+                "user_id": user_id, "course_id": method["course_id"],
+                "method_id": method_id, "method": method["method"]})
         assigned = result["role_assigned"]
         if assigned and assigned["created"]:
             await _audit(conn, "role.assigned", actor_id, user_id,
@@ -488,6 +496,12 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
             "removed_path": {"method_id": method_id, "component": component},
             "last_path": result["last_path_cleanup"],
             "roles_removed": result["roles_removed"]})
+        # Plugin outbox — `last_path` lets subscribers distinguish "lost one
+        # of several paths" (still enrolled) from "left the course".
+        await plugin_core.emit(conn, "enrolment.deleted", {
+            "user_id": user_id, "course_id": course_id,
+            "method_id": method_id, "method": method["method"],
+            "last_path": result["last_path_cleanup"]})
         if result["roles_removed"]:
             await _audit(conn, "role.unassigned", actor_id, user_id, course_id, ctx, {
                 "roles_removed": result["roles_removed"],

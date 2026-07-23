@@ -17,6 +17,7 @@ import { useLang } from "../context/Lang";
 import Icon from "../components/teaching/icons";
 import TeachingTabs, { tabPanelId } from "../components/teaching/TeachingTabs";
 import { Bi, EmptyState, ErrorState, useAnnounce } from "../components/teaching/ui";
+import TeamsChip from "../components/TeamsChip";
 import ParticipantsTab from "../components/teaching/ParticipantsTab";
 import EnrolmentRequestsTab from "../components/teaching/EnrolmentRequestsTab";
 import ActivitiesTab from "../components/teaching/ActivitiesTab";
@@ -266,6 +267,7 @@ export default function TeachingPage() {
       <div className="t-titlerow">
         {title}
         <CourseSelect courses={teachable} value={course?.id} onChange={setCourseId} lang={lang} dir={dir} />
+        <TeamsChip courseId={course?.id} />
       </div>
 
       <div className="t-workspace t-surface">

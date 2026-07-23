@@ -25,6 +25,7 @@ import { useLang } from "../context/Lang";
 import { useSession } from "../context/Session";
 import { coursePresentation } from "../lib/coursePresentation";
 import { fetchOverview } from "../lib/progressApi";
+import TeamsChip from "../components/TeamsChip";
 import CourseArt from "../components/lms/CourseArt";
 import AssignmentPanel from "../components/lms/AssignmentPanel";
 import QuizPanel from "../components/lms/QuizPanel";
@@ -392,6 +393,7 @@ function DetailsPanel({ vm, busy, isMobile, canManage, teachers, onAssignTeacher
               : <span className="detail-muted"><Bi en="Not assigned" ar="لم يُعيَّن" /></span>}
           </MetaRow>
           <MetaRow icon={c.visible ? "eye" : "eyeOff"} labelEn="Visibility" labelAr="الظهور"><Bi en={c.visible ? "Visible" : "Hidden"} ar={c.visible ? "مرئي" : "مخفي"} /></MetaRow>
+          <TeamsChip courseId={c.id} />
           <MetaRow icon="group" labelEn="Group mode" labelAr="وضع المجموعة"><Bi en={gm.en} ar={gm.ar} /></MetaRow>
           <MetaRow icon={STATE_META[vm.state]?.icon ?? "lock"} labelEn="Enrolment status" labelAr="حالة التسجيل"><StatusPill state={vm.state} /></MetaRow>
           {PROGRESS_STATES.has(vm.state) && (
