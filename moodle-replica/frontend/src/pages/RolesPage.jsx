@@ -1,47 +1,78 @@
-// Roles / Permissions (task 06 §4.3). Four tabs over one domain: the
-// capability sheet, role assignments, the permission checker (the demo
-// star), and the decision log. A log row can be replayed: it jumps to the
-// checker with the original inputs prefilled and re-runs them.
+// Roles & Permissions — the security-sensitive workspace. Five tabs over one
+// domain, on the shared WhoCan shell (sidebar / header / theme / language come
+// from App.jsx; this page owns only its content region). It sets its own `dir`
+// because the shell forces `.content` to LTR for every page but the Dashboard.
+//
+// The Permission Checker is the star and the default tab. A Decision Log row
+// can be REPLAYED: it prefills the checker with the stored inputs and re-runs.
 import { useEffect, useState } from "react";
-import PageIntro from "../components/common/PageIntro";
-import Term from "../components/common/Term";
-import Tabs from "../components/common/Tabs";
+import { useLang } from "../context/Lang";
+import { RolesTabs, panelId, tabId } from "../components/roles/ui";
+import PermissionChecker from "../components/roles/PermissionChecker";
 import CapabilityEditor from "../components/roles/CapabilityEditor";
 import AssignRoleForm from "../components/roles/AssignRoleForm";
-import PermissionChecker from "../components/roles/PermissionChecker";
 import DecisionLog from "../components/roles/DecisionLog";
+import RoleCreateForm from "../components/roles/RoleCreateForm";
 
-// Checker first: it's the demo star, so it's the default landing tab.
-const TABS = ["Permission Checker", "Roles", "Assignments", "Decision Log"];
+const TABS = [
+  { key: "checker", en: "Permission checker", ar: "فاحص الصلاحيات", icon: "shieldSearch" },
+  { key: "capabilities", en: "Role capabilities", ar: "صلاحيات الدور", icon: "shieldPlus" },
+  { key: "assignments", en: "Assignments", ar: "التعيينات", icon: "users" },
+  { key: "log", en: "Decision log", ar: "سجل القرارات", icon: "clipboardClock" },
+  { key: "create", en: "Create role", ar: "إنشاء دور", icon: "circlePlus" },
+];
+const KEYS = TABS.map((t) => t.key);
 
 export default function RolesPage() {
-  const [tab, setTab] = useState(() => {
+  const { lang, dir } = useLang();
+  const [active, setActive] = useState(() => {
     const saved = localStorage.getItem("roles-tab");
-    return TABS.includes(saved) ? saved : TABS[0];
+    return KEYS.includes(saved) ? saved : "checker";
   });
   const [replay, setReplay] = useState(null);
 
   useEffect(() => {
-    localStorage.setItem("roles-tab", tab);
-  }, [tab]);
+    localStorage.setItem("roles-tab", active);
+  }, [active]);
 
-  function replayDecision(decision) {
-    setReplay({ ...decision, nonce: (replay?.nonce ?? 0) + 1 });
-    setTab("Permission Checker");
+  function onReplay(payload) {
+    setReplay(payload);
+    setActive("checker");
   }
 
   return (
-    <div>
-      <h1>Roles &amp; Permissions</h1>
-      <PageIntro line={<>What each <Term k="role" /> may do, where — and the checker that answers "can this person do this, and why".</>}>
-        <p>Permissions live on roles, not people. A <Term k="capability" /> is one nameable action; roles say allow / prevent / <Term k="prohibit" /> for it, at a <Term k="context" /> — rules nest System › course › activity, deeper <Term k="override">overrides</Term> win.</p>
-        <p>The Permission Checker tab shows the whole decision, gate by gate, with evidence. That screen is the project.</p>
-      </PageIntro>
-      <Tabs tabs={TABS} active={tab} onChange={setTab} />
-      {tab === "Roles" && <CapabilityEditor />}
-      {tab === "Assignments" && <AssignRoleForm />}
-      {tab === "Permission Checker" && <PermissionChecker replay={replay} />}
-      {tab === "Decision Log" && <DecisionLog onReplay={replayDecision} />}
+    <div className="roles" dir={dir} lang={lang}>
+      <header className="rl-head">
+        <h1 className="rl-h1">
+          <span>Roles &amp; permissions</span>
+          <span className="rl-h1__ar" lang="ar">
+            الأدوار والصلاحيات
+          </span>
+        </h1>
+        <p className="rl-head__lede">
+          {lang === "ar"
+            ? "من يستطيع فعل ماذا، وأين — والفاحص الذي يجيب: هل يمكن لهذا الشخص فعل ذلك، ولماذا. القرارات وأدلتها تأتي من الخادم."
+            : "What each role may do, and where — plus the checker that answers “can this person do this, and why”. Every decision and its evidence come from the backend."}
+        </p>
+      </header>
+
+      <RolesTabs tabs={TABS} active={active} onChange={setActive} dir={dir} />
+
+      <div
+        className="rl-panel"
+        id={panelId(active)}
+        role="tabpanel"
+        aria-labelledby={tabId(active)}
+        tabIndex={0}
+      >
+        {active === "checker" && (
+          <PermissionChecker replay={replay} onReplayConsumed={() => setReplay(null)} />
+        )}
+        {active === "capabilities" && <CapabilityEditor />}
+        {active === "assignments" && <AssignRoleForm />}
+        {active === "log" && <DecisionLog onReplay={onReplay} />}
+        {active === "create" && <RoleCreateForm />}
+      </div>
     </div>
   );
 }
