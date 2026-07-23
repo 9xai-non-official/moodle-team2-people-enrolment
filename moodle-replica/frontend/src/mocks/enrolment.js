@@ -53,7 +53,7 @@ const enrolledUserIds = (courseId) => [
 const buildParticipant = (userId, courseId) => {
   const user = userById(userId);
   const rawPaths = pathsOfUserInCourse(userId, courseId); // {e, m}
-  const now = new Date("2026-07-21"); // matches the seed's frozen clock
+  const now = new Date(); // real current time (was a stale hardcoded date)
   // PathOut liveness = the four §6.2 conditions (status active + method enabled
   // + window open). Account suspension is a SEPARATE axis and never folds into
   // per-path `live` — mirrors the backend's ACTIVE_CONDITIONS_SQL exactly.
@@ -471,7 +471,7 @@ export const routes = [
       const method = METHODS.find(
         (mm) => mm.course_id === courseId && mm.method === "self",
       );
-      const now = new Date("2026-07-21");
+      const now = new Date();
       const alreadyEnrolled = ENROLMENTS.some(
         (e) =>
           e.user_id === b.user_id &&

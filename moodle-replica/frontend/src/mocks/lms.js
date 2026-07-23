@@ -271,6 +271,67 @@ export const routes = [
     },
   },
   {
+    // Teacher/manager enrols a student via the course's manual method. Mirrors
+    // the real lms/enrol.py (enrol_user(..., activate=True)). This path was
+    // previously UNMOCKED, so in mock mode the write fell through to the real
+    // backend while the student's mock catalog never saw it — the enrolled
+    // student showed as "not enrolled" from their own side.
+    method: "POST",
+    pattern: /^\/api\/lms\/courses\/(\d+)\/enrol$/,
+    handler: (m, body) => {
+      const course = courseById(Number(m[1]));
+      const userId = Number(body.user_id);
+      const user = userById(userId);
+      if (!course || !user) throw new ApiError(404, { detail: "unknown course or user" });
+      const method = body.method_id
+        ? METHODS.find((mm) => mm.id === body.method_id)
+        : METHODS.find(
+            (mm) => mm.course_id === course.id && mm.method === "manual" && mm.status === "enabled",
+          );
+      if (!method)
+        throw new ApiError(409, {
+          detail: "manual enrolment is disabled in this course — enable it first",
+        });
+      const roleId = body.role_id || method.default_role_id;
+      const existing = ENROLMENTS.find(
+        (e) => e.method_id === method.id && e.user_id === userId,
+      );
+      if (existing) {
+        existing.status = "active"; // explicit teacher enrol activates (activate=True)
+      } else {
+        ENROLMENTS.push({
+          id: nextId(ENROLMENTS),
+          method_id: method.id,
+          user_id: userId,
+          status: "active",
+          time_start: null,
+          time_end: null,
+        });
+      }
+      const ctx = contextForCourse(course.id);
+      if (
+        ctx &&
+        !ROLE_ASSIGNMENTS.some(
+          (ra) => ra.user_id === userId && ra.context_id === ctx.id && ra.role_id === roleId,
+        )
+      )
+        ROLE_ASSIGNMENTS.push({
+          id: nextId(ROLE_ASSIGNMENTS),
+          user_id: userId,
+          role_id: roleId,
+          context_id: ctx.id,
+          component: "",
+          item_id: method.id,
+        });
+      return {
+        enrolled: true,
+        course_id: course.id,
+        user_id: userId,
+        role: roleById(roleId)?.short_name,
+      };
+    },
+  },
+  {
     method: "POST",
     pattern: /^\/api\/lms\/courses\/(\d+)\/self-enrol$/,
     handler: (m, body) => {

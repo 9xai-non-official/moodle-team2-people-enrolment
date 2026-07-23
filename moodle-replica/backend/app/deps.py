@@ -53,11 +53,18 @@ async def require_capability(user_id: int, capability: str, context_id: int) -> 
         )
 
 
+_COURSE_CTX_CACHE: dict[int, int] = {}  # course→context is immutable
+
+
 async def course_context_id(course_id: int) -> int:
+    cached = _COURSE_CTX_CACHE.get(course_id)
+    if cached is not None:
+        return cached
     row = await db.fetch_one(
         "select id from context where level = 'course' and instance_id = $1",
         course_id,
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"no context for course {course_id}")
+    _COURSE_CTX_CACHE[course_id] = row["id"]
     return row["id"]

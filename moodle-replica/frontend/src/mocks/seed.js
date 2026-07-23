@@ -271,7 +271,9 @@ export const groupsOfUser = (userId, courseId) =>
     .filter((g) => g && g.course_id === courseId);
 
 // Effective per-path liveness — mirrors v_enrolment_detail in the schema.
-export function pathLive(enrolment, method, user, now = new Date("2026-07-21")) {
+// `now` defaults to the real current time: a hardcoded past date made any
+// enrolment starting today/later read as "not yet started" → wrongly suspended.
+export function pathLive(enrolment, method, user, now = new Date()) {
   if (user?.suspended) return false;
   if (enrolment.status !== "active") return false;
   if (method.status !== "enabled") return false;
@@ -290,7 +292,7 @@ export function effectiveStatus(userId, courseId) {
   if (!paths.length) return null; // not enrolled at all
   if (user?.suspended) return "account_suspended";
   if (paths.some(({ e, m }) => pathLive(e, m, user))) return "active";
-  const now = new Date("2026-07-21");
+  const now = new Date();
   if (paths.some(({ e }) => e.time_end && new Date(e.time_end) <= now)) return "expired";
   if (paths.some(({ m }) => m.status === "disabled")) return "method_disabled";
   return "suspended";

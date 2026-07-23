@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../api";
 import { ApiError } from "../../errors";
+import { fetchCourseGroupOptions } from "../../lib/groupsApi";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import DataTable from "../common/DataTable";
@@ -57,9 +58,11 @@ export default function CompletionGrid({ courseId }) {
   }, [courseId, groupId, actorId, reloadKey]);
 
   // Group options come from the Groups domain — cross-domain GET is fine (§4.5).
+  // Via the groupsApi seam so it resolves in both mock mode and against the live
+  // backend (GET /api/groups?course_id=), not just the mock course-scoped path.
   useEffect(() => {
-    apiGet(`/api/groups/courses/${courseId}/groups`)
-      .then((list) => setGroups(Array.isArray(list) ? list : []))
+    fetchCourseGroupOptions(courseId)
+      .then(setGroups)
       .catch(() => setGroups([]));
   }, [courseId]);
 

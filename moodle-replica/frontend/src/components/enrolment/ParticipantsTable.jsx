@@ -19,6 +19,7 @@ import {
   EmptyState,
   Pagination,
   ScopedError,
+  friendlyError,
   EnrolmentStatus,
   Segmented,
   Sheet,
@@ -83,7 +84,7 @@ export default function ParticipantsTable({ courseId, courseName, onNavigate, la
       })
       .catch((e) => {
         if (id !== reqId.current) return;
-        setLoadError(e.message);
+        setLoadError(friendlyError(e, lang));
         setRows([]);
       })
       .finally(() => {
@@ -253,14 +254,26 @@ export default function ParticipantsTable({ courseId, courseName, onNavigate, la
           disabled: busy,
           onSelect: () => setStatusOf(p, "active", r.user_id),
         });
+      // R-COHORT (ENR-013): an active cohort-synced path can't be unenrolled
+      // directly — the server refuses it (409). Offer it disabled with the
+      // reason instead of a button that only fails, matching the paths panel.
+      const cohortLocked = p.method === "cohort" && p.status === "active";
       items.push({
         kind: "item",
         icon: "userMinus",
         label: "Unenrol",
         ar: "إلغاء التسجيل",
         danger: true,
-        disabled: busy,
-        onSelect: () => setConfirmUnenrol({ row: r, path: p }),
+        disabled: busy || cohortLocked,
+        title: cohortLocked
+          ? both(
+              "Synced from a cohort — suspend it first, or remove the user from the cohort.",
+              "مُزامَن من فوج — أوقفه أولاً أو أزل المستخدم من الفوج.",
+            )
+          : undefined,
+        onSelect: cohortLocked
+          ? undefined
+          : () => setConfirmUnenrol({ row: r, path: p }),
       });
     });
     items.push({ kind: "sep" });

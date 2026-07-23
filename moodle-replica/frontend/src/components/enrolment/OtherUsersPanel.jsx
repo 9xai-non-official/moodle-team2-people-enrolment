@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { apiGet } from "../../api";
 import Icon from "./icons";
-import { Avatar, EmptyState, ScopedError, Spinner, T, both, roleMeta } from "./ui";
+import { Avatar, EmptyState, ScopedError, Spinner, T, both, friendlyError, roleMeta } from "./ui";
 
 const PREVIEW = 5;
 
@@ -20,7 +20,7 @@ export default function OtherUsersPanel({ courseId, refreshKey, onEnrol, lang })
     setError(null);
     apiGet(`/api/enrolment/courses/${courseId}/other-users`)
       .then(setRows)
-      .catch((e) => setError(e.message))
+      .catch((e) => setError(friendlyError(e, lang)))
       .finally(() => setLoading(false));
   };
 

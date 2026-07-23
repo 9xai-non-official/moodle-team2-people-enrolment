@@ -207,6 +207,49 @@ async def active_paths(db, user_id: int, course_id: int | None = None) -> list[d
     return rows
 
 
+# Same-course role integrity: within one course a participant is either a
+# LEARNER or STAFF, never both. Enrolling someone as a student in a course
+# where they already teach/manage (or vice versa) is a role conflict, not a
+# valid multi-role — Moodle allows a person to teach one course and learn
+# another, but not to be teacher AND student of the SAME course.
+_LEARNER_ROLES = {"student"}
+_STAFF_ROLES = {"manager", "editingteacher", "teacher", "teacher-allgroups",
+                "coursecreator"}
+
+
+def _role_class(short_name: str | None) -> str | None:
+    if short_name in _LEARNER_ROLES:
+        return "learner"
+    if short_name in _STAFF_ROLES:
+        return "staff"
+    return None  # guest / custom roles are unclassified — never conflict
+
+
+async def _role_conflict(conn, user_id: int, ctx: int,
+                         new_role_id: int) -> str | None:
+    """A reason string if giving `new_role_id` to the user at this course
+    context would put them on both sides of the learner/staff divide, else
+    None. Same-class (student↔student, teacher↔manager) never conflicts."""
+    new = await _one(conn, "select short_name from role where id = $1", new_role_id)
+    new_class = _role_class(new["short_name"]) if new else None
+    if new_class is None:
+        return None
+    held = await _all(conn, """
+        select distinct r.short_name
+          from role_assignment ra
+          join role r on r.id = ra.role_id
+         where ra.user_id = $1 and ra.context_id = $2
+    """, user_id, ctx)
+    for h in held:
+        hc = _role_class(h["short_name"])
+        if hc and hc != new_class:
+            return (f"role conflict: this user already holds '{h['short_name']}' "
+                    f"in this course, so they cannot also be assigned "
+                    f"'{new['short_name']}' — a course participant is staff or a "
+                    f"learner, not both")
+    return None
+
+
 async def enrol_user(db, method_id: int, user_id: int, *,
                      role_id: int | None = None,
                      time_start: datetime | None = None,
@@ -237,6 +280,17 @@ async def enrol_user(db, method_id: int, user_id: int, *,
             # §6.7 — "no real enrolments here!": guest is a session concept.
             return {"ok": False,
                     "reason": "guest methods never create enrolment rows (§6.7)"}
+
+        # Same-course role-conflict guard: refuse BEFORE writing anything, so a
+        # rejected enrol leaves no enrolment or role row behind. Blocks e.g.
+        # enrolling a course's teacher/manager as a student (and vice versa).
+        _eff_role = role_id or method["default_role_id"]
+        if _eff_role is not None:
+            _ctx = await _course_context_id(conn, method["course_id"])
+            if _ctx is not None:
+                _conflict = await _role_conflict(conn, user_id, _ctx, _eff_role)
+                if _conflict:
+                    return {"ok": False, "reason": _conflict}
 
         row = await _one(conn, """
             insert into enrolment (method_id, user_id, status, time_start,

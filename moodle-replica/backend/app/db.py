@@ -6,12 +6,17 @@ backend/.env (gitignored) — copy backend/.env.example and fill in the
 password from TEAM_CREDENTIALS.md.
 
 Use the session pooler (port 5432). The transaction pooler (6543) breaks
-asyncpg's prepared statements; statement_cache_size=0 is set anyway so
-either port works.
+asyncpg's prepared statements, so caching is disabled ONLY on that port; on
+the session pooler / a direct connection we keep the prepared-statement cache
+on. Over a high-latency link (the DB is in ap-northeast-1) that matters: with
+caching off, every query pays a separate PREPARE round-trip, ~doubling
+per-query latency. We also keep the pool warm (min = max) so a request reuses
+an established connection instead of paying ~2s to cold-connect per acquire.
 """
 import json
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import asyncpg
 from dotenv import load_dotenv
@@ -20,14 +25,26 @@ load_dotenv()
 
 _pool: asyncpg.Pool | None = None
 
+# Supabase transaction pooler port — prepared statements are unsafe there.
+_TX_POOLER_PORT = 6543
+
 
 async def connect() -> None:
     global _pool
     url = os.environ.get("DATABASE_URL")
     if not url:
         return  # run without a DB; endpoints answer 503 with a clear reason
+    on_tx_pooler = urlparse(url).port == _TX_POOLER_PORT
+    # 0 disables caching (required on the tx pooler); 100 is asyncpg's default.
+    statement_cache_size = 0 if on_tx_pooler else 100
+    # Supabase's session pooler caps TOTAL clients (shared across the team) at
+    # ~15, so stay a good citizen: keep a couple of connections warm for latency
+    # but leave plenty of headroom for teammates + other instances.
     _pool = await asyncpg.create_pool(
-        url, min_size=1, max_size=5, statement_cache_size=0
+        url,
+        min_size=2,          # keep a couple warm — avoids ~2s cold connects
+        max_size=6,          # headroom for a read + a write without hogging the pooler
+        statement_cache_size=statement_cache_size,
     )
 
 

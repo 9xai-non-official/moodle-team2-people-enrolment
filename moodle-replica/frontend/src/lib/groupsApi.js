@@ -38,6 +38,20 @@ export async function fetchGroupsBoard(courseId) {
   );
 }
 
+// Lightweight {id,name} list for group pickers (e.g. the progress report
+// filter) — same contract-path-then-live-fallback seam as above, but without
+// the per-group member fetch a full board needs.
+export async function fetchCourseGroupOptions(courseId) {
+  try {
+    const list = await apiGet(`/api/groups/courses/${courseId}/groups`);
+    return Array.isArray(list) ? list.map((g) => ({ id: g.id, name: g.name })) : [];
+  } catch (e) {
+    if (!is404(e)) throw e;
+  }
+  const groups = await apiGet(`/api/groups?course_id=${courseId}`);
+  return Array.isArray(groups) ? groups.map((g) => ({ id: g.id, name: g.name })) : [];
+}
+
 export async function fetchGroupings(courseId) {
   try {
     return await apiGet(`/api/groups/courses/${courseId}/groupings`);

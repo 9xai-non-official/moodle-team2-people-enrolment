@@ -29,6 +29,26 @@ export function T({ en, ar }) {
 export const both = (en, ar) => (ar ? `${en} · ${ar}` : en);
 export const pick = (lang, en, ar) => (lang === "ar" && ar ? ar : en);
 
+// Turn an API failure into a message a user should read. A 403 here means the
+// signed-in person has no teaching/management role in THIS course — a normal,
+// expected outcome (e.g. a teacher opening a course they don't teach), not a
+// bug to file. Show a plain sentence instead of the raw self-locating error
+// ("GET /api/... → 403: actor N lacks capability 'course:viewparticipants'").
+// Any other error keeps its verbatim message (which names the endpoint).
+export function friendlyError(e, lang) {
+  if (e?.status === 403) {
+    return pick(
+      lang,
+      "You don’t have access to this course. Enrolment tools are only available for courses where you’re a teacher or manager.",
+      "ليس لديك صلاحية الوصول إلى هذا المقرر. أدوات التسجيل متاحة فقط للمقررات التي تكون فيها معلمًا أو مديرًا.",
+    );
+  }
+  if (e?.status === 401) {
+    return pick(lang, "Please sign in to continue.", "يرجى تسجيل الدخول للمتابعة.");
+  }
+  return e?.message ?? String(e);
+}
+
 /* ---- initials avatar ----------------------------------------------------- */
 function initialsOf(name) {
   if (!name) return "?";
@@ -361,6 +381,8 @@ export function ActionsMenu({ label, items, align = "end" }) {
                 type="button"
                 role="menuitem"
                 disabled={it.disabled}
+                title={it.title}
+                aria-disabled={it.disabled || undefined}
                 className={`enr-menu__item ${it.danger ? "enr-menu__item--danger" : ""}`}
                 onClick={() => {
                   setOpen(false);

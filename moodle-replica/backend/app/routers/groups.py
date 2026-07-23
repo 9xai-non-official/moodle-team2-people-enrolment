@@ -62,6 +62,15 @@ async def delete_group(group_id: int, principal: dict = Depends(current_user)):
     return await svc.delete_group(group_id, actor_id=principal["id"])
 
 
+# ---- a student's own view: their groups + the members they may see ----
+@router.get("/my")
+async def my_groups(course_id: int, principal: dict = Depends(current_user)):
+    """The signed-in user's own groups in a course, each with visible members.
+    No group:manage gate — a participant may always see the groups they belong
+    to; group_members() enforces per-group visibility from their vantage."""
+    return await svc.my_groups_with_members(principal["id"], course_id)
+
+
 # ---- members ----
 @router.get("/{group_id}/members")
 async def list_members(group_id: int, principal: dict = Depends(current_user)):

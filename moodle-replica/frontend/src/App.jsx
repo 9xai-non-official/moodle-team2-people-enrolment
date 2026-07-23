@@ -190,6 +190,7 @@ const NAV_AR = {
   Enrolment: "التسجيل",
   Roles: "الأدوار",
   Groups: "المجموعات",
+  "My Groups": "مجموعاتي",
   Progress: "التقدّم",
 };
 
