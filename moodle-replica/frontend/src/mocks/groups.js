@@ -48,6 +48,37 @@ function resolvesAccessAllGroups(actorId, course) {
 export const routes = [
   {
     method: "GET",
+    pattern: /^\/api\/groups\/my$/,
+    handler: (m, body, query, ctx = {}) => {
+      const courseId = Number(query.course_id);
+      const callerId = Number(ctx.actingUserId);
+      if (!callerId) throw new ApiError(401, { detail: "missing acting user" });
+      return groupsOfUser(callerId, courseId).map((g) => ({
+        id: g.id,
+        course_id: g.course_id,
+        name: g.name,
+        id_number: g.id_number ?? null,
+        description: g.description ?? "",
+        participation: !!g.participation,
+        visibility: g.visibility ?? "all",
+        member_count: GROUP_MEMBERS.filter((mm) => mm.group_id === g.id).length,
+        members: GROUP_MEMBERS.filter((mm) => mm.group_id === g.id).map((mm) => {
+          const u = userById(mm.user_id);
+          return {
+            group_id: mm.group_id,
+            user_id: mm.user_id,
+            username: u?.username ?? null,
+            first_name: u?.first_name ?? "",
+            last_name: u?.last_name ?? "",
+            component: mm.component,
+            item_id: mm.item_id,
+          };
+        }),
+      }));
+    },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/groups\/courses\/(\d+)\/groups$/,
     handler: (m) => {
       const courseId = Number(m[1]);
@@ -110,16 +141,9 @@ export const routes = [
       const groupId = Number(m[1]);
       const group = GROUPS.find((g) => g.id === groupId);
       if (!group) throw new ApiError(404, { detail: "group not found" });
-      const course = courseById(group.course_id);
       const userId = body.user_id;
-      // group membership does not imply enrolment: refuse non-active participants.
-      if (effectiveStatus(userId, course.id) !== "active") {
-        throw new ApiError(403, {
-          reasons: [
-            `user is not an active participant of ${course.short_name} — enrol them first (group membership does not imply enrolment)`,
-          ],
-        });
-      }
+      // Manual add in Groups is allowed even for users not yet actively enrolled.
+      // Enrolment-owned membership sync is enforced in backend enrolment flows.
       // GRP-036 / R-DUP-ADD: duplicate-add is a SILENT no-op (Moodle parity),
       // not a 409 — the backend does on-conflict-do-nothing. (mock retired to
       // match real behaviour — T2-GRP-003 §7 FALSE_SIMILARITY fix.)

@@ -522,11 +522,17 @@ async def add_member(group_id: int, user_id: int, component: str = "", item_id: 
     passes `enrol_self`/`enrol_cohort` + the method id. The client body carries
     only {user_id} (schemas_groups.MemberAdd, extra='forbid'), so a forged
     component can never reach here over HTTP (Moodle group/lib.php:77-101).
-    SA-GRP-004 enrolment guard and GRP-036 on-conflict-do-nothing preserved."""
+    SA-GRP-004 enrolment guard and GRP-036 on-conflict-do-nothing preserved.
+
+    Manual adds (component='') are intentionally allowed even if the user is
+    not currently actively enrolled; this keeps the Groups page operational for
+    staff workflows where enrolment is handled later. Enrolment-owned rows keep
+    the active-enrolment guard.
+    """
     course_id = await _group_course_id(group_id)
     if course_id is None:
         return {"ok": False, "reason": "group does not exist"}
-    if not await _is_active_enrolled(user_id, course_id):
+    if component and not await _is_active_enrolled(user_id, course_id):
         return {"ok": False, "reason": "user has no active enrolment in this course"}
     await db.fetch_one(
         """
