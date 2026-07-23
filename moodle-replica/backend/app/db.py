@@ -13,6 +13,7 @@ either port works.
 import json
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import asyncpg
 from dotenv import load_dotenv
@@ -21,14 +22,28 @@ load_dotenv()
 
 _pool: asyncpg.Pool | None = None
 
+# Supabase transaction pooler (6543) multiplexes server connections and breaks
+# prepared statements; the session pooler (5432) / a direct connection keep a
+# dedicated connection where prepared statements are safe and a warm pool holds.
+_TX_POOLER_PORT = 6543
+
 
 async def connect() -> None:
     global _pool
     url = os.environ.get("DATABASE_URL")
     if not url:
         return  # run without a DB; endpoints answer 503 with a clear reason
+    on_tx_pooler = urlparse(url).port == _TX_POOLER_PORT
+    # Perf (DB is in ap-northeast-1, ~250ms RTT):
+    #  * warm pool (min_size == max_size) so a request reuses an established
+    #    connection instead of paying ~1.7s to cold-connect per acquire;
+    #  * keep asyncpg's prepared-statement cache ON except on the tx pooler —
+    #    with it OFF every query re-PREPAREs (2 round-trips), ~doubling latency.
     _pool = await asyncpg.create_pool(
-        url, min_size=1, max_size=5, statement_cache_size=0
+        url,
+        min_size=5,
+        max_size=5,
+        statement_cache_size=0 if on_tx_pooler else 100,
     )
 
 

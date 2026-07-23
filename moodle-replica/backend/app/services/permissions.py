@@ -21,6 +21,7 @@ findings docs. Key rules:
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -744,11 +745,27 @@ async def has_capability(db, user_id: int, capability: str, context_id: int,
         # capability (mirrors build_decision gate 1). This is what stops a
         # suspended user from acting on the mutation paths that gate on this.
         return False
+    if ident["is_admin"] and doanything and simulate_role is None:
+        return True
+
+    # PERF fast path: for a normal authenticated user, delegate the core
+    # resolution to the in-DB fn_can() — ONE round-trip — instead of the
+    # multi-query Python walk (_load_context_chain + _held_roles + _load_cap_rows),
+    # which cost ~15 sequential round-trips (multiple seconds against a remote
+    # DB). fn_can implements the same rules (prohibit-sticky, deepest-wins). An
+    # unknown capability simply resolves to not-granted. The Python path below is
+    # kept for guests (risk-blocking) and role simulation, which fn_can doesn't
+    # model.
+    if simulate_role is None and not ident["is_guest"]:
+        verdict = await db.fetch_val(
+            "select fn_can($1, $2, $3)", user_id, capability, context_id)
+        if isinstance(verdict, str):
+            verdict = json.loads(verdict)
+        return bool(verdict.get("granted")) if verdict else False
+
     cap = await _load_capability(db, capability)
     if cap is None:
         return False
-    if ident["is_admin"] and doanything and simulate_role is None:
-        return True
     path_ids, labels, _ = await _load_context_chain(db, context_id)
     held = await _held_roles(db, user_id, path_ids, labels, ident["is_guest"], simulate_role)
     if ident["is_guest"] and (
