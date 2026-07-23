@@ -30,9 +30,13 @@ fi
 echo "▶ Frontend: dependencies + local env"
 cd "$FRONTEND"
 npm install --no-fund --no-audit
-if [ ! -f .env.local ]; then
-  printf 'VITE_USE_MOCKS=0\nVITE_API_URL=http://localhost:%s\n' "$API_PORT" > .env.local
-  echo "  created frontend/.env.local (real backend on :$API_PORT, mocks off)"
+# IMPORTANT: must be .env.development.local, NOT .env.local. In Vite the
+# committed .env.development (VITE_USE_MOCKS=1) OUTRANKS .env.local, so a
+# .env.local override is silently ignored and the app runs in MOCK mode (looks
+# "not connected to the database"). Only .env.development.local beats it.
+if [ ! -f .env.development.local ]; then
+  printf 'VITE_USE_MOCKS=0\nVITE_API_URL=http://localhost:%s\n' "$API_PORT" > .env.development.local
+  echo "  created frontend/.env.development.local (real backend on :$API_PORT, mocks off)"
 fi
 
 cat <<EOF
