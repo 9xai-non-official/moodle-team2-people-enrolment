@@ -12,8 +12,10 @@ row. Capability resolves ALLOW; the group gate denies. That simultaneous
 "capability green, group red" is the whole point of the project.
 """
 import asyncio
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -274,6 +276,61 @@ def test_decisions_decodes_reasons_json():
     rows = asyncio.run(permissions.decisions(db, actor_id=None, limit=10))
     assert isinstance(rows[0]["reasons"], dict)
     assert rows[0]["reasons"]["decision"] == "DENY"
+
+
+class FakeDecisionsJoinDB:
+    """A row as the joined Decision-Log query returns it: the audit row plus the
+    actor's name and the context's level/instance."""
+
+    async def fetch_all(self, q, *a):
+        return [{
+            "id": 7, "actor_id": 3, "capability": "activity:grade", "context_id": 9,
+            "target_id": 5, "allowed": False,
+            "reasons": json.dumps({
+                "allowed": False, "decision": "DENY",
+                "blocking_reasons": ["Target is outside the actor's allowed groups"],
+                "supporting_reasons": ["Capability 'activity:grade': allowed by role teacher"],
+            }),
+            "decided_at": datetime(2026, 7, 23, 5, 30, tzinfo=timezone.utc),
+            "actor_name": "Tariq Assist", "ctx_level": "activity", "ctx_instance": 4,
+        }]
+
+    async def fetch_one(self, q, *a):
+        return None
+
+
+def test_decisions_row_carries_what_the_decision_log_renders():
+    # The Decision Log tab reads actor.full_name / context_label / verdict /
+    # created_at / reason lines / replay inputs. Serving raw audit columns made
+    # the tab throw on the first row, so the endpoint owns that shape.
+    rows = asyncio.run(permissions.decisions(FakeDecisionsJoinDB(), limit=10))
+    r = rows[0]
+    assert r["actor"] == {"id": 3, "full_name": "Tariq Assist"}
+    assert r["context_label"] == "activity:4"
+    assert r["verdict"] == "denied"
+    assert r["created_at"] == "2026-07-23T05:30:00+00:00"
+    assert r["blocking_reasons"] == ["Target is outside the actor's allowed groups"]
+    assert r["supporting_reasons"] == ["Capability 'activity:grade': allowed by role teacher"]
+    # Replay re-runs the stored check from these inputs.
+    assert r["inputs"] == {"actor_id": 3, "capability": "activity:grade",
+                           "context_id": 9, "target_user_id": 5}
+    assert isinstance(r["reasons"], dict)  # full stored evidence stays available
+
+
+def test_decisions_row_survives_a_missing_actor_or_context():
+    # Left joins: a decision about a since-deleted user must still render.
+    class Sparse(FakeDecisionsJoinDB):
+        async def fetch_all(self, q, *a):
+            rows = await FakeDecisionsJoinDB.fetch_all(self, q, *a)
+            rows[0].update(actor_name=None, ctx_level=None, ctx_instance=None,
+                           allowed=True, decided_at=None)
+            return rows
+
+    r = asyncio.run(permissions.decisions(Sparse(), limit=10))[0]
+    assert r["actor"]["full_name"] == "user 3"
+    assert r["context_label"] == "context 9"
+    assert r["verdict"] == "allowed"
+    assert r["created_at"] is None
 
 
 # ===========================================================================

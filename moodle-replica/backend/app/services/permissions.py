@@ -1043,36 +1043,80 @@ async def clone_role(db, source_role_id: int, short_name: str, name: str,
     return {"role": dict(new), "capabilities_copied": copied}
 
 
+# The Decision Log reads the audit row joined to the two things a person needs
+# to read it: WHO was judged and WHERE. Raw ids are meaningless in the UI.
+_DECISIONS_SELECT = (
+    "select pd.id, pd.actor_id, pd.capability, pd.context_id, pd.target_id, "
+    "pd.allowed, pd.reasons, pd.decided_at, "
+    "(u.first_name || ' ' || u.last_name) as actor_name, "
+    "c.level as ctx_level, c.instance_id as ctx_instance "
+    "from permission_decision pd "
+    "left join app_user u on u.id = pd.actor_id "     # left: a deleted actor
+    "left join context c on c.id = pd.context_id "    # left: a dropped context
+)
+
+
 async def decisions(db, actor_id: Optional[int] = None, limit: int = 50) -> list[dict]:
-    """The audit log for the demo's Decision Log tab."""
+    """The audit log for the demo's Decision Log tab.
+
+    Returns each stored check in the shape the tab renders — actor name, context
+    label, verdict, timestamp, the reason lines, and the inputs that let a row be
+    replayed — alongside the raw audit columns and the full stored evidence
+    (`reasons`), which the detail view opens up. Serving bare ids instead made
+    the tab throw on its first row.
+    """
     db = _resolve_db(db)
     try:
         if actor_id is not None:
             rows = await db.fetch_all(
-                "select id, actor_id, capability, context_id, target_id, allowed, reasons, "
-                "decided_at from permission_decision where actor_id=$1 "
-                "order by decided_at desc limit $2",
+                _DECISIONS_SELECT
+                + "where pd.actor_id=$1 order by pd.decided_at desc limit $2",
                 actor_id, limit,
             )
         else:
             rows = await db.fetch_all(
-                "select id, actor_id, capability, context_id, target_id, allowed, reasons, "
-                "decided_at from permission_decision order by decided_at desc limit $1",
+                _DECISIONS_SELECT + "order by pd.decided_at desc limit $1",
                 limit,
             )
-        import json
-
-        out = []
-        for r in rows:
-            r = dict(r)
-            # asyncpg decodes jsonb to str (no codec on the shared pool); hand
-            # the client a real object, not a doubly-encoded string.
-            if isinstance(r.get("reasons"), str):
-                try:
-                    r["reasons"] = json.loads(r["reasons"])
-                except (ValueError, TypeError):
-                    pass
-            out.append(r)
-        return out
+        return [_decision_row(dict(r)) for r in rows]
     except Exception:
         return []
+
+
+def _decision_row(r: dict) -> dict:
+    """One audit row → one Decision-Log row. Every derived field falls back to
+    something printable: a log entry about a since-deleted user still renders."""
+    import json
+
+    # asyncpg decodes jsonb to str (no codec on the shared pool); hand the client
+    # a real object, not a doubly-encoded string.
+    if isinstance(r.get("reasons"), str):
+        try:
+            r["reasons"] = json.loads(r["reasons"])
+        except (ValueError, TypeError):
+            pass
+    stored = r["reasons"] if isinstance(r.get("reasons"), dict) else {}
+
+    level, instance = r.pop("ctx_level", None), r.pop("ctx_instance", None)
+    actor_name = r.pop("actor_name", None)
+    decided_at = r.get("decided_at")
+
+    r["actor"] = {"id": r.get("actor_id"),
+                  "full_name": actor_name or f"user {r.get('actor_id')}"}
+    r["context_label"] = (
+        f"{level}:{instance}" if level is not None else f"context {r.get('context_id')}"
+    )
+    r["verdict"] = "allowed" if r.get("allowed") else "denied"
+    r["created_at"] = decided_at.isoformat() if hasattr(decided_at, "isoformat") else decided_at
+    # The evidence, already computed at decision time — never recomputed here:
+    # a replayed check may differ from what was true then, and the log records
+    # what WAS decided.
+    r["blocking_reasons"] = list(stored.get("blocking_reasons") or [])
+    r["supporting_reasons"] = list(stored.get("supporting_reasons") or [])
+    r["inputs"] = {
+        "actor_id": r.get("actor_id"),
+        "capability": r.get("capability"),
+        "context_id": r.get("context_id"),
+        "target_user_id": r.get("target_id"),
+    }
+    return r

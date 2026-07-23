@@ -1,0 +1,1 @@
+{"compilerOptions":{"jsx":"react-jsx","allowJs":true,"module":"ESNext","target":"ES2022","moduleResolution":"bundler"},"include":["src"]}

@@ -126,11 +126,14 @@ export default function PermissionChecker({ replay }) {
       cachedGet("/api/users"),
     ])
       .then(([caps, ctxs, rs, us]) => {
-        setCapabilities(caps);
+        // The catalogue arrives as capability ROWS from the API and as bare
+        // names from the mock; this picker only ever deals in names.
+        const capNames = caps.map((c) => (typeof c === "string" ? c : c.name));
+        setCapabilities(capNames);
         setContexts(ctxs);
         setRoles(rs);
         setUsers(us);
-        if (caps.length) setCapability((cur) => cur ?? caps[0]);
+        if (capNames.length) setCapability((cur) => cur ?? capNames[0]);
         if (ctxs.length) setContextId((cur) => cur ?? ctxs[0].id);
         setCompareA((cur) => cur ?? us.find((u) => u.username === "ta.a")?.id ?? null);
         setCompareB((cur) => cur ?? us.find((u) => u.username === "ta.allgroups")?.id ?? null);
