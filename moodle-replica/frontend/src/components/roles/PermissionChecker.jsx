@@ -1,441 +1,916 @@
-// Permission Checker — the demo star. Feeds the four-gate pipeline and
-// renders exactly what the API returns: a verdict banner, every gate in
-// order (a passed capability gate stays green right beside a failed group
-// gate — the display never short-circuits), the per-role capability
-// resolution, and the reasons. No business rules live in this component.
-import { useEffect, useRef, useState } from "react";
-import { apiPost } from "../../api";
-import { cachedGet } from "../../lib/catalog";
+// Permission Checker — the project centrepiece. Builds the real
+// POST /api/permissions/check payload (actor_user_id, NOT actor_id) and renders
+// exactly what the backend's §17.3 evidence contract returns: a verdict, the
+// structured gate evidence (role grants · overrides · prohibits · group scope),
+// a side-by-side actor comparison, and the live decision log. No permission
+// rule is computed here — the verdict and every reason come from the server.
+//
+// Identity vs subject (§7): the authenticated PRINCIPAL is the acting user
+// (api.js mints its Bearer). The ACTOR field is the SUBJECT being explained —
+// inspecting someone other than yourself needs user:viewdetails, which the
+// backend enforces (a 403 we surface verbatim, never hide).
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiGet, apiPost } from "../../api";
 import { useActingUser } from "../../context/ActingUser";
-import UserSelect from "../common/UserSelect";
-import ContextPath from "../common/ContextPath";
-import Badge from "../common/Badge";
+import { useLang } from "../../context/Lang";
+import Icon from "./icons";
+import {
+  Avatar,
+  Btn,
+  Combo,
+  EmptyState,
+  PermBadge,
+  ResultBadge,
+  ScopedError,
+  SectionCard,
+  SkeletonRows,
+  Spinner,
+  T,
+  Tech,
+  both,
+  pick,
+  useAnnounce,
+} from "./ui";
 import ReasonList from "../common/ReasonList";
+import {
+  CapabilityOption,
+  ContextOption,
+  UserOption,
+  ctxCourseId,
+  findCtx,
+  useCatalogs,
+  userById,
+} from "./data";
 
-// Each gate gets a plain-words subtitle — a first-time viewer should read the
-// pipeline without knowing Moodle's vocabulary.
-const GATE_SUBTITLES = {
-  enrolment: "are they in this course?",
-  role: "do they hold a role here?",
-  capability: "does the role allow this action?",
-  group: "is the target within their group scope?",
-};
+const SYSTEM_LABEL_FALLBACK = "system:0";
 
-function GatePipeline({ gates }) {
-  return gates.map((g) => (
-    <div key={g.gate} className={`gate-row gate-row--${g.passed ? "pass" : "fail"}`}>
-      <div className="gate-row__name">
-        {g.gate}
-        <div className="muted" style={{ fontWeight: 400, fontSize: "0.75rem" }}>
-          {GATE_SUBTITLES[g.gate]}
-        </div>
+// ---- verdict card ---------------------------------------------------------
+function VerdictCard({ state, result, error, actorName, capability, lang, onRetry }) {
+  let tone = "idle";
+  let icon = "shieldQuestion";
+  let head = pick(lang, "Not checked", "لم يُفحص");
+  let sub = pick(lang, "Choose an actor, capability, and context.", "اختر ممثلاً وصلاحية وسياقاً.");
+  let ar = null;
+
+  if (state === "loading") {
+    tone = "loading";
+    icon = "loader";
+    head = pick(lang, "Checking permission", "جارٍ فحص الصلاحية");
+    sub = null;
+  } else if (state === "error") {
+    tone = "error";
+    icon = "triangleAlert";
+    head = pick(lang, "Check failed", "فشل الفحص");
+    sub = null;
+  } else if (result) {
+    const allowed = result.allowed;
+    tone = allowed ? "allow" : "deny";
+    icon = allowed ? "shieldCheck" : "shieldX";
+    head = allowed ? "ALLOWED" : "DENIED";
+    ar = allowed ? "مسموح" : "مرفوض";
+    if (allowed) {
+      sub = result.admin_bypass
+        ? pick(lang, "Allowed — site administrator bypass.", "مسموح — تجاوز مدير الموقع.")
+        : result.simulated_role
+          ? pick(lang, `Allowed while previewing as “${result.simulated_role}”.`, `مسموح أثناء المعاينة كدور «${result.simulated_role}».`)
+          : result.supporting_reasons?.[0] ?? pick(lang, "All gates passed.", "اجتاز كل البوابات.");
+    } else {
+      sub = result.blocking_reasons?.[0] ?? pick(lang, "Blocked.", "محظور.");
+    }
+  }
+
+  return (
+    <div className={`rl-verdict rl-verdict--${tone}`} aria-live="off">
+      <div className="rl-verdict__icon">
+        <Icon name={icon} size={38} spin={tone === "loading"} />
       </div>
-      <div>
-        {g.evidence.map((ev, i) => (
-          <div key={i} className="gate-row__evidence">
-            {ev}
+      <div className="rl-verdict__text">
+        <div className="rl-verdict__head">
+          <span>{head}</span>
+          {ar && (
+            <span className="rl-ar" lang="ar">
+              {ar}
+            </span>
+          )}
+        </div>
+        {tone === "loading" && actorName && (
+          <div className="rl-verdict__sub">
+            {pick(lang, "Evaluating for", "يتم التقييم لـ")} {actorName}…
           </div>
-        ))}
+        )}
+        {sub && <div className="rl-verdict__sub">{sub}</div>}
+        {state === "error" && (
+          <div className="rl-verdict__err">
+            <ScopedError error={error} onRetry={onRetry} lang={lang} compact />
+          </div>
+        )}
+        {result && capability && (
+          <div className="rl-verdict__cap">
+            <Tech>{capability}</Tech>
+          </div>
+        )}
       </div>
     </div>
-  ));
+  );
 }
 
-// One human sentence summarizing the machine verdict — pure presentation of
-// the gates the API returned, no rule logic of its own.
-function plainVerdict(result, actorName) {
-  const who = actorName || "This user";
-  const failed = result.gates.filter((g) => !g.passed);
-  if (failed.length === 0) return `${who} may do this here — every gate passed.`;
-  const capPassed = result.gates.find((g) => g.gate === "capability")?.passed;
-  const groupFail = failed.find((g) => g.gate === "group");
-  if (capPassed && groupFail) {
-    return (
-      `${who}'s role ALLOWS this action — but not on this target: ` +
-      `${groupFail.evidence[0] ?? "outside their group scope"}. ` +
-      `Allowed in general, blocked for THIS person. That contrast is the story.`
-    );
-  }
-  const first = failed[0];
-  return `Blocked at the "${first.gate}" gate (${GATE_SUBTITLES[first.gate] ?? ""}): ${
-    first.evidence[0] ?? "no evidence line"
-  }`;
-}
-
-// First gate whose pass/fail differs between two results, matched by gate name
-// (not index) so it survives any ordering. Powers the compare contrast line.
-function firstDivergentGate(ra, rb) {
-  return ra.gates.find((ga) => {
-    const gb = rb.gates.find((x) => x.gate === ga.gate);
-    return gb && ga.passed !== gb.passed;
-  })?.gate;
-}
-
-// One compare column: actor header, then loading / error / full verdict —
-// reusing GatePipeline + plainVerdict so both sides read identically to the
-// single check above. `col` is {result} or {error}, undefined while loading.
-function CompareColumn({ name, col, loading }) {
+// ---- one expandable evidence row ------------------------------------------
+function EvidenceRow({ icon, tone, labelEn, labelAr, summary, detail, dominant }) {
+  const [open, setOpen] = useState(false);
+  const hasDetail = Boolean(detail);
   return (
-    <div>
-      <div className="panel__title">{name}</div>
+    <div className={`rl-ev rl-ev--${tone} ${dominant ? "rl-ev--dominant" : ""}`}>
+      <div className="rl-ev__main">
+        <span className="rl-ev__ic">
+          <Icon name={icon} size={16} />
+        </span>
+        <span className="rl-ev__label">
+          <T en={labelEn} ar={labelAr} />
+        </span>
+        <span className="rl-ev__summary">{summary}</span>
+        {hasDetail && (
+          <button
+            type="button"
+            className="rl-ev__toggle"
+            aria-expanded={open}
+            aria-label={both(open ? "Hide details" : "Show details", open ? "إخفاء التفاصيل" : "عرض التفاصيل")}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <Icon name={open ? "chevronUp" : "chevronDown"} size={16} />
+          </button>
+        )}
+      </div>
+      {hasDetail && open && <div className="rl-ev__detail">{detail}</div>}
+    </div>
+  );
+}
+
+// ---- evidence panel (pure render of the real response) --------------------
+function EvidencePanel({ result, lang }) {
+  const rootLabel = result.contexts_considered?.[result.contexts_considered.length - 1] ?? SYSTEM_LABEL_FALLBACK;
+  const capEntries = Object.entries(result.capability_values ?? {});
+  const grants = capEntries.filter(([, v]) => v.value === "allow");
+  const overrides = capEntries.filter(([, v]) => v.decided_at && v.decided_at !== rootLabel);
+  const prohibits = result.prohibits_found ?? [];
+  const gs = result.group_scope ?? {};
+
+  // context path — render root→leaf (contexts_considered is leaf→root), LTR.
+  const ctxChain = [...(result.contexts_considered ?? [])].reverse();
+
+  const rolesTable = (
+    <table className="rl-ev-table">
+      <thead>
+        <tr>
+          <th scope="col">{pick(lang, "Role", "الدور")}</th>
+          <th scope="col">{pick(lang, "Context", "السياق")}</th>
+          <th scope="col">{pick(lang, "Provenance", "المصدر")}</th>
+          <th scope="col">{pick(lang, "This capability", "هذه الصلاحية")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(result.roles_considered ?? []).map((r, i) => {
+          const cv = result.capability_values?.[r.role];
+          return (
+            <tr key={i}>
+              <td>{r.role}</td>
+              <td>
+                <Tech>{r.context ?? "—"}</Tech>
+              </td>
+              <td className="rl-ev-table__prov">{r.provenance || "manual"}</td>
+              <td>
+                {cv ? (
+                  <span className="rl-ev-table__val">
+                    <PermBadge permission={cv.value} lang={lang} />
+                    {cv.decided_at && (
+                      <span className="rl-muted">
+                        @ <Tech>{cv.decided_at}</Tech>
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="rl-muted">—</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  // group scope summary
+  let gsSummary;
+  let gsTone = "info";
+  if (gs.mode == null) {
+    gsSummary = pick(lang, "Not applicable", "غير منطبق");
+    gsTone = "neutral";
+  } else if (gs.access_all_groups) {
+    gsSummary = pick(lang, "All groups (accessallgroups)", "كل المجموعات");
+  } else if (gs.mode !== "separate") {
+    gsSummary = pick(lang, `No separation (mode: ${gs.mode})`, `دون فصل (النمط: ${gs.mode})`);
+  } else if (gs.shared === true) {
+    gsSummary = pick(lang, "Shares a group with target", "يشترك في مجموعة مع الهدف");
+  } else if (gs.shared === false) {
+    gsSummary = pick(lang, "No common group", "لا مجموعة مشتركة");
+    gsTone = "deny";
+  } else {
+    gsSummary = pick(lang, "Group-scoped", "محدد بالمجموعة");
+  }
+
+  const enrol = result.enrolment_paths ?? [];
+
+  return (
+    <div className="rl-evidence">
+      <EvidenceRow
+        icon="folderTree"
+        tone="neutral"
+        labelEn="Context path"
+        labelAr="مسار السياق"
+        summary={
+          <span className="rl-ev-path" dir="ltr">
+            {ctxChain.map((c, i) => (
+              <span key={i}>
+                {i > 0 && <span className="rl-ev-path__sep"> › </span>}
+                <Tech>{c}</Tech>
+              </span>
+            ))}
+          </span>
+        }
+      />
+
+      <EvidenceRow
+        icon="circleCheck"
+        tone={grants.length ? "allow" : "neutral"}
+        labelEn="Role grants"
+        labelAr="منح الأدوار"
+        summary={
+          grants.length
+            ? grants.map(([r]) => r).join(", ")
+            : pick(lang, "No role grants this capability", "لا دور يمنح هذه الصلاحية")
+        }
+        detail={rolesTable}
+      />
+
+      <EvidenceRow
+        icon="cornerDownRight"
+        tone={overrides.length ? "prevent" : "neutral"}
+        labelEn="Overrides"
+        labelAr="التجاوزات"
+        summary={
+          overrides.length ? (
+            <span className="rl-ev-chips">
+              {overrides.map(([r, v]) => (
+                <span key={r} className="rl-ev-chip">
+                  {r}: <PermBadge permission={v.value} lang={lang} /> @ <Tech>{v.decided_at}</Tech>
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="rl-muted">{pick(lang, "None", "لا يوجد")}</span>
+          )
+        }
+      />
+
+      <EvidenceRow
+        icon="ban"
+        tone={prohibits.length ? "prohibit" : "neutral"}
+        dominant={prohibits.length > 0 && !result.allowed}
+        labelEn="Prohibits"
+        labelAr="الحظر"
+        summary={
+          prohibits.length ? (
+            <span className="rl-ev-chips">
+              {prohibits.map((p, i) => (
+                <span key={i} className="rl-ev-chip rl-ev-chip--danger">
+                  {p.role} @ <Tech>{p.context}</Tech>
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="rl-muted">{pick(lang, "None", "لا يوجد")}</span>
+          )
+        }
+      />
+
+      <EvidenceRow
+        icon="users"
+        tone={gsTone}
+        labelEn="Group scope"
+        labelAr="نطاق المجموعة"
+        summary={gsSummary}
+        detail={
+          gs.mode != null ? (
+            <dl className="rl-ev-dl">
+              <div>
+                <dt>{pick(lang, "Mode", "النمط")}</dt>
+                <dd>
+                  <Tech>{gs.mode}</Tech>
+                </dd>
+              </div>
+              <div>
+                <dt>{pick(lang, "Actor groups", "مجموعات الممثل")}</dt>
+                <dd>{gs.actor_groups?.length ? gs.actor_groups.join(", ") : pick(lang, "none", "لا شيء")}</dd>
+              </div>
+              <div>
+                <dt>{pick(lang, "Target groups", "مجموعات الهدف")}</dt>
+                <dd>{gs.target_groups?.length ? gs.target_groups.join(", ") : pick(lang, "none", "لا شيء")}</dd>
+              </div>
+              <div>
+                <dt>accessallgroups</dt>
+                <dd>{gs.access_all_groups ? pick(lang, "yes", "نعم") : pick(lang, "no", "لا")}</dd>
+              </div>
+            </dl>
+          ) : null
+        }
+      />
+
+      {result.simulated_role && (
+        <EvidenceRow
+          icon="userRound"
+          tone="info"
+          labelEn="Simulated role"
+          labelAr="دور محاكى"
+          summary={
+            <span>
+              {result.simulated_role}
+              <span className="rl-muted"> · {pick(lang, "admin bypass suppressed", "تعطيل تجاوز المدير")}</span>
+            </span>
+          }
+        />
+      )}
+
+      {result.admin_bypass && (
+        <EvidenceRow
+          icon="shieldCheck"
+          tone="info"
+          labelEn="Administrator bypass"
+          labelAr="تجاوز المدير"
+          summary={pick(lang, "Site administrator — all checks pass", "مدير الموقع — تُجتاز كل الفحوص")}
+        />
+      )}
+
+      {enrol.length > 0 && (
+        <EvidenceRow
+          icon="gitBranch"
+          tone="allow"
+          labelEn="Enrolment paths"
+          labelAr="مسارات التسجيل"
+          summary={`${enrol.length} ${pick(lang, "active path(s)", "مسار نشط")}`}
+          detail={
+            <ul className="rl-ev-list">
+              {enrol.map((p, i) => (
+                <li key={i}>
+                  <Tech>{p.kind ?? p.method ?? "path"}</Tech>
+                  {p.status ? ` — ${p.status}` : ""}
+                </li>
+              ))}
+            </ul>
+          }
+        />
+      )}
+
+      {/* verbatim backend "why" — never rephrased or swallowed */}
+      {result.blocking_reasons?.length > 0 && (
+        <ReasonList reasons={result.blocking_reasons} tone="error" title={pick(lang, "Blocking reasons", "أسباب الحظر")} />
+      )}
+      {result.supporting_reasons?.length > 0 && (
+        <ReasonList reasons={result.supporting_reasons} tone="ok" title={pick(lang, "Supporting reasons", "أسباب داعمة")} />
+      )}
+    </div>
+  );
+}
+
+// ---- one comparison column -------------------------------------------------
+function CompareColumn({ name, roleLabel, col, loading, lang }) {
+  return (
+    <div className="rl-compare__col">
+      <div className="rl-compare__id">
+        <Avatar name={name} size={30} />
+        <div>
+          <div className="rl-compare__name">{name}</div>
+          {roleLabel && <div className="rl-compare__role">{roleLabel}</div>}
+        </div>
+      </div>
       {loading ? (
-        <div className="muted">checking…</div>
+        <Spinner lang={lang} />
       ) : col?.error ? (
-        <div className="error-banner">{col.error}</div>
+        <ScopedError error={col.error} lang={lang} compact />
       ) : col?.result ? (
         <>
-          <div className={`verdict-banner verdict-banner--${col.result.verdict}`}>
-            {col.result.verdict.toUpperCase()}
-          </div>
-          <GatePipeline gates={col.result.gates} />
-          <p>{plainVerdict(col.result, col.name)}</p>
+          <ResultBadge allowed={col.result.allowed} lang={lang} />
+          <p className="rl-compare__reason">
+            {col.result.allowed
+              ? col.result.supporting_reasons?.slice(-1)[0]
+              : col.result.blocking_reasons?.[0]}
+          </p>
         </>
       ) : null}
     </div>
   );
 }
 
-export default function PermissionChecker({ replay }) {
+export default function PermissionChecker({ replay, onReplayConsumed }) {
   const { actingUser } = useActingUser();
-  const [capabilities, setCapabilities] = useState([]);
-  const [contexts, setContexts] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [users, setUsers] = useState([]);
+  const { lang } = useLang();
+  const { users, roles, contexts, capabilities, courses, loading: catLoading, error: catError, reload } =
+    useCatalogs();
+
   const [actorId, setActorId] = useState(null);
   const [actorTouched, setActorTouched] = useState(false);
   const [capability, setCapability] = useState(null);
   const [contextId, setContextId] = useState(null);
   const [targetUserId, setTargetUserId] = useState(null);
   const [activityId, setActivityId] = useState(null);
+  const [activities, setActivities] = useState([]);
   const [simulateRoleId, setSimulateRoleId] = useState(null);
+  const [action, setAction] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+
+  const [state, setState] = useState("idle"); // idle | loading | done | error
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [compareA, setCompareA] = useState(null);
-  const [compareB, setCompareB] = useState(null);
-  const [compareResult, setCompareResult] = useState(null);
+
+  const [compareBId, setCompareBId] = useState(null);
+  const [compare, setCompare] = useState(null); // {a, b}
   const [comparing, setComparing] = useState(false);
-  const resultRef = useRef(null);
-  const scrollToResult = useRef(false); // armed by scenario buttons only
 
+  const [decisions, setDecisions] = useState([]);
+  const seqRef = useRef(0);
+  const [live, announce] = useAnnounce();
+
+  // Defaults once catalogues land.
   useEffect(() => {
-    Promise.all([
-      cachedGet("/api/roles/capabilities"),
-      cachedGet("/api/roles/contexts"),
-      cachedGet("/api/roles"),
-      cachedGet("/api/users"),
-    ])
-      .then(([caps, ctxs, rs, us]) => {
-        // The catalogue arrives as capability ROWS from the API and as bare
-        // names from the mock; this picker only ever deals in names.
-        const capNames = caps.map((c) => (typeof c === "string" ? c : c.name));
-        setCapabilities(capNames);
-        setContexts(ctxs);
-        setRoles(rs);
-        setUsers(us);
-        if (capNames.length) setCapability((cur) => cur ?? capNames[0]);
-        if (ctxs.length) setContextId((cur) => cur ?? ctxs[0].id);
-        setCompareA((cur) => cur ?? us.find((u) => u.username === "ta.a")?.id ?? null);
-        setCompareB((cur) => cur ?? us.find((u) => u.username === "ta.allgroups")?.id ?? null);
-      })
-      .catch((e) => setError(e.message));
-  }, []);
+    if (capability == null && capabilities.length) {
+      setCapability(capabilities.find((c) => c.name === "course:view")?.name ?? capabilities[0].name);
+    }
+    if (contextId == null && contexts.length) setContextId(contexts[0].id);
+  }, [capabilities, contexts, capability, contextId]);
 
-  // actor defaults to the acting user and follows it until the user picks one.
+  // Actor defaults to the acting principal and follows it until the user picks.
   useEffect(() => {
     if (!actorTouched && actingUser) setActorId(actingUser.id);
   }, [actingUser, actorTouched]);
 
+  // Activities for the selected context's course; reset a stale activity.
+  useEffect(() => {
+    const ctx = findCtx(contexts, contextId);
+    const courseId = ctxCourseId(ctx, contexts);
+    if (courseId == null) {
+      setActivities([]);
+      setActivityId(null);
+      return;
+    }
+    let live2 = true;
+    apiGet(`/api/courses/${courseId}/activities`)
+      .then((list) => {
+        if (!live2) return;
+        setActivities(list);
+        setActivityId((cur) => (list.some((a) => a.id === cur) ? cur : null));
+      })
+      .catch(() => live2 && setActivities([]));
+    return () => {
+      live2 = false;
+    };
+  }, [contextId, contexts]);
+
+  const loadDecisions = useCallback(() => {
+    apiGet("/api/permissions/decisions?limit=6")
+      .then(setDecisions)
+      .catch(() => setDecisions([]));
+  }, []);
+  useEffect(() => {
+    loadDecisions();
+  }, [loadDecisions]);
+
+  const buildPayload = useCallback(
+    (overrides = {}) => {
+      const p = {
+        actor_user_id: overrides.actorId ?? actorId,
+        capability: overrides.capability ?? capability,
+        context_id: overrides.contextId ?? contextId,
+      };
+      const target = overrides.targetUserId ?? targetUserId;
+      const act = overrides.activityId ?? activityId;
+      const sim = overrides.simulateRoleId ?? simulateRoleId;
+      const actn = (overrides.action ?? action).trim?.() ?? "";
+      if (target) p.target_user_id = target;
+      if (act) p.activity_id = act;
+      if (sim) p.simulate_role_id = sim;
+      if (actn) p.action = actn;
+      return p;
+    },
+    [actorId, capability, contextId, targetUserId, activityId, simulateRoleId, action],
+  );
+
+  const submit = useCallback(
+    (payload) => {
+      const body = payload ?? buildPayload();
+      if (!body.actor_user_id || !body.capability || !body.context_id) return;
+      const seq = ++seqRef.current;
+      setState("loading");
+      setError(null);
+      apiPost("/api/permissions/check", body)
+        .then((res) => {
+          if (seq !== seqRef.current) return; // stale — a newer check superseded
+          setResult(res);
+          setState("done");
+          const who = userById(users, body.actor_user_id)?.full_name ?? `#${body.actor_user_id}`;
+          announce(`${res.allowed ? "Allowed" : "Denied"}: ${body.capability} for ${who}`);
+          loadDecisions();
+        })
+        .catch((e) => {
+          if (seq !== seqRef.current) return;
+          setError(e);
+          setState("error");
+          announce(pick(lang, "Check failed", "فشل الفحص"));
+        });
+    },
+    [buildPayload, users, announce, loadDecisions, lang],
+  );
+
   // Replay from the Decision Log: prefill the stored inputs and re-run.
   useEffect(() => {
-    const inputs = replay?.inputs;
-    if (!inputs) return;
-    setActorId(inputs.actor_id);
+    if (!replay) return;
+    setActorId(replay.actor_user_id);
     setActorTouched(true);
-    setCapability(inputs.capability);
-    setContextId(inputs.context_id);
-    setTargetUserId(inputs.target_user_id ?? null);
-    setActivityId(inputs.activity_id ?? null);
-    setSimulateRoleId(inputs.simulate_role_id ?? null);
-    submit(inputs);
+    setCapability(replay.capability);
+    setContextId(replay.context_id);
+    setTargetUserId(replay.target_user_id ?? null);
+    setActivityId(null);
+    setSimulateRoleId(null);
+    submit({
+      actor_user_id: replay.actor_user_id,
+      capability: replay.capability,
+      context_id: replay.context_id,
+      ...(replay.target_user_id ? { target_user_id: replay.target_user_id } : {}),
+    });
+    onReplayConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replay?.nonce]);
 
-  // When a scenario button ran the check, bring the verdict into view.
-  useEffect(() => {
-    if (!result || !scrollToResult.current) return;
-    scrollToResult.current = false;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    resultRef.current?.scrollIntoView({
-      behavior: reduce ? "auto" : "smooth",
-      block: "start",
-    });
-  }, [result]);
-
-  function submit(payload) {
-    setError(null);
-    setResult(null);
-    setSubmitting(true);
-    apiPost("/api/permissions/check", payload ?? {
-      actor_id: actorId,
-      capability,
-      context_id: contextId,
-      target_user_id: targetUserId || undefined,
-      activity_id: activityId || undefined,
-      simulate_role_id: simulateRoleId || undefined,
-    })
-      .then(setResult)
-      .catch((e) => setError(e.message))
-      .finally(() => setSubmitting(false));
-  }
-
-  // Two checks, same question, different actor. Each call resolves to its own
-  // {result} or {error} so one column failing never blanks the other. Shared
-  // fields mirror submit()'s body; simulate_role is left out on purpose — the
-  // point is contrasting two real personas' own roles.
   function runCompare() {
+    if (!compareBId) return;
     setComparing(true);
-    setCompareResult(null);
-    const shared = {
-      capability,
-      context_id: contextId,
-      target_user_id: targetUserId || undefined,
-      activity_id: activityId || undefined,
-    };
-    const nameFor = (id) => users.find((u) => u.id === id)?.full_name ?? "—";
+    setCompare(null);
+    const shared = { capability, context_id: contextId };
+    if (targetUserId) shared.target_user_id = targetUserId;
+    if (activityId) shared.activity_id = activityId;
     const call = (id) =>
-      apiPost("/api/permissions/check", { actor_id: id, ...shared })
+      apiPost("/api/permissions/check", { actor_user_id: id, ...shared })
         .then((result) => ({ result }))
-        .catch((e) => ({ error: e.message }));
-    Promise.all([call(compareA), call(compareB)]).then(([a, b]) => {
-      setCompareResult({
-        a: { name: nameFor(compareA), ...a },
-        b: { name: nameFor(compareB), ...b },
-      });
+        .catch((error) => ({ error }));
+    Promise.all([call(actorId), call(compareBId)]).then(([a, b]) => {
+      setCompare({ a, b });
       setComparing(false);
+      loadDecisions();
     });
   }
 
-  const activityContexts = contexts.filter((c) => c.level === "activity");
-  const nameA = users.find((u) => u.id === compareA)?.full_name ?? "Actor A";
-  const nameB = users.find((u) => u.id === compareB)?.full_name ?? "Actor B";
+  const actorName = userById(users, actorId)?.full_name;
+  const principalName = actingUser?.full_name;
+  const isOtherSubject = actorId != null && actingUser && actorId !== actingUser.id;
+  const canCheck = actorId && capability && contextId && state !== "loading";
+  const compareBName = userById(users, compareBId)?.full_name ?? pick(lang, "Actor B", "الممثل ب");
 
-  // One-click hard-case walkthroughs. Resolved by username / context label so
-  // they work in mock AND real-DB mode (ids differ between the two worlds).
-  const SCENARIOS = [
-    { label: "HC-3: scoped TA grades other group", sub: "Role allows grading — group scope still blocks this target.", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
-    { label: "HC-3: all-groups TA, same check", sub: "Same action, all-groups role — the group gate now passes.", actor: "ta.allgroups", cap: "activity:grade", ctx: "Assignment 1", target: "student.b" },
-    { label: "HC-4: TA grades student in two groups", sub: "One shared group is enough — overlap allows the grade.", actor: "ta.a", cap: "activity:grade", ctx: "Assignment 1", target: "student.multi" },
-    { label: "Prohibit: guest tries to submit", sub: "Prohibit outranks allow — no lower level can re-enable it.", actor: "student.a", cap: "activity:submit", ctx: "Assignment 1", simulateRole: "guest" },
-  ];
-
-  function runScenario(s) {
-    const actor = users.find((u) => u.username === s.actor);
-    const ctx = contexts.find((c) => c.label.includes(s.ctx));
-    const target = s.target ? users.find((u) => u.username === s.target) : null;
-    const simRole = s.simulateRole ? roles.find((r) => (r.short_name ?? r.shortname) === s.simulateRole) : null;
-    if (!actor || !ctx) {
-      setError(`scenario needs user '${s.actor}' + context '${s.ctx}' — not found in this dataset`);
-      return;
-    }
-    setActorId(actor.id);
-    setActorTouched(true);
-    setCapability(s.cap);
-    setContextId(ctx.id);
-    setTargetUserId(target?.id ?? null);
-    setActivityId(ctx.level === "activity" ? ctx.instance_id : null);
-    setSimulateRoleId(simRole?.id ?? null);
-    scrollToResult.current = true; // arm the auto-scroll for this run
-    submit({
-      actor_id: actor.id,
-      capability: s.cap,
-      context_id: ctx.id,
-      target_user_id: target?.id ?? undefined,
-      activity_id: ctx.level === "activity" ? ctx.instance_id : undefined,
-      simulate_role_id: simRole?.id ?? undefined,
-    });
+  if (catError) {
+    return (
+      <SectionCard icon="shieldSearch" title="Permission checker" titleAr="فاحص الصلاحيات">
+        <ScopedError error={catError} onRetry={reload} lang={lang} />
+      </SectionCard>
+    );
   }
 
   return (
-    <div>
-      <div className="panel">
-        <div className="panel__title">Demo scenarios — one click per hard case</div>
-        <div className="form-row">
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.label}
-              className="btn btn--scenario"
-              onClick={() => runScenario(s)}
-              disabled={submitting}
-            >
-              <span className="btn--scenario__label">{s.label}</span>
-              <span className="btn--scenario__sub">{s.sub}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="rl-checker">
+      {live}
 
-      <div className="panel">
-        <div className="panel__title">Check a permission</div>
-        <div className="form-row">
-          <label>Actor</label>
-          <UserSelect
-            value={actorId}
-            onChange={(v) => {
-              setActorId(v);
-              setActorTouched(true);
-            }}
+      {/* ---- check form ---- */}
+      <SectionCard icon="shieldSearch" title="Permission checker" titleAr="فاحص الصلاحيات">
+        <p className="rl-lead">
+          <T
+            en="Ask “can this person do this, here — and why?”. The verdict and every reason come from the backend, gate by gate."
+            ar="اسأل: هل يستطيع هذا الشخص فعل ذلك هنا — ولماذا؟ النتيجة وكل سبب يأتيان من الخادم، بوابةً بوابة."
           />
-          <label>Capability</label>
-          <select
-            className="select"
-            value={capability ?? ""}
-            onChange={(e) => setCapability(e.target.value)}
-          >
-            {capabilities.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <label>Context</label>
-          <select
-            className="select"
-            value={contextId ?? ""}
-            onChange={(e) => setContextId(Number(e.target.value))}
-          >
-            {contexts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-row">
-          <label>Target user</label>
-          <UserSelect value={targetUserId} onChange={setTargetUserId} placeholder="— none —" />
-          <label>Activity</label>
-          <select
-            className="select"
-            value={activityId ?? ""}
-            onChange={(e) => setActivityId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">— none —</option>
-            {activityContexts.map((c) => (
-              <option key={c.id} value={c.instance_id}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-          <label>Simulate role</label>
-          <select
-            className="select"
-            value={simulateRoleId ?? ""}
-            onChange={(e) => setSimulateRoleId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">— none —</option>
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn--primary"
-            onClick={() => submit()}
-            disabled={!actorId || !capability || !contextId || submitting}
-          >
-            {submitting ? "Checking…" : "Check"}
-          </button>
-        </div>
-        <div className="muted">
-          Leave target/activity empty for a pure capability check.
-        </div>
-        <ContextPath contextId={contextId} contexts={contexts} />
-        {error && <div className="error-banner">{error}</div>}
-      </div>
+        </p>
 
-      {result && (
-        <div className="panel checker-verdict" ref={resultRef}>
-          <div className={`verdict-banner verdict-banner--${result.verdict}`}>
-            {result.verdict.toUpperCase()}
-          </div>
-          <p>
-            {plainVerdict(
-              result,
-              users.find((u) => u.id === Number(actorId))?.full_name,
-            )}
-          </p>
+        <div className="rl-formgrid">
+          <label className="rl-field">
+            <span className="rl-field__label">
+              <Icon name="userRound" size={14} />
+              <T en="Actor" ar="الممثل" />
+              <span
+                className="rl-field__hint"
+                title={pick(lang, "The user whose permission is being evaluated.", "المستخدم الذي تُقيَّم صلاحيته.")}
+              >
+                <Icon name="info" size={13} />
+              </span>
+            </span>
+            <Combo
+              items={users}
+              value={actorId}
+              onChange={(id) => {
+                setActorId(id);
+                setActorTouched(true);
+              }}
+              itemKey={(u) => u.id}
+              itemLabel={(u) => u.full_name}
+              itemSearch={(u) => `${u.full_name} ${u.username}`}
+              renderItem={(u) => <UserOption u={u} lang={lang} />}
+              leadingIcon="userRound"
+              ariaLabel={both("Actor", "الممثل")}
+              placeholder={pick(lang, "Select actor", "اختر ممثلاً")}
+              loading={catLoading}
+              lang={lang}
+              invalid={!actorId}
+            />
+          </label>
 
-          <div className="panel__title">Gate pipeline</div>
-          <div className="gate-list">
-            <GatePipeline gates={result.gates} />
-          </div>
+          <label className="rl-field">
+            <span className="rl-field__label">
+              <Icon name="shield" size={14} />
+              <T en="Capability" ar="الصلاحية" />
+            </span>
+            <Combo
+              items={capabilities}
+              value={capability}
+              onChange={(name) => setCapability(name)}
+              itemKey={(c) => c.name}
+              itemLabel={(c) => c.name}
+              itemSearch={(c) => `${c.name} ${c.component} ${c.cap_type}`}
+              renderItem={(c) => <CapabilityOption c={c} lang={lang} />}
+              leadingIcon="shield"
+              ariaLabel={both("Capability", "الصلاحية")}
+              placeholder={pick(lang, "Select capability", "اختر صلاحية")}
+              loading={catLoading}
+              lang={lang}
+              invalid={!capability}
+            />
+          </label>
 
-          {result.capability_values.length > 0 && (
-            <>
-              <div className="panel__title">Capability resolution</div>
-              {result.capability_values.map((v, i) => (
-                <div key={i} className="form-row">
-                  <span>
-                    {v.role} → <strong>{v.permission}</strong>
+          <label className="rl-field">
+            <span className="rl-field__label">
+              <Icon name="folder" size={14} />
+              <T en="Context" ar="السياق" />
+            </span>
+            <Combo
+              items={contexts}
+              value={contextId}
+              onChange={(id) => setContextId(id)}
+              itemKey={(c) => c.id}
+              itemLabel={(c) => c.label}
+              itemSearch={(c) => `${c.label} ${c.level} ${c.path}`}
+              renderItem={(c) => <ContextOption ctx={c} courses={courses} lang={lang} />}
+              leadingIcon="folder"
+              ariaLabel={both("Context", "السياق")}
+              placeholder={pick(lang, "Select context", "اختر سياقاً")}
+              loading={catLoading}
+              lang={lang}
+              invalid={!contextId}
+            />
+          </label>
+
+          <label className="rl-field">
+            <span className="rl-field__label">
+              <Icon name="userRoundSearch" size={14} />
+              <T en="Target user" ar="المستخدم المستهدف" />
+              <span className="rl-field__opt">({pick(lang, "optional", "اختياري")})</span>
+            </span>
+            <Combo
+              items={users}
+              value={targetUserId}
+              onChange={(id) => setTargetUserId(id)}
+              itemKey={(u) => u.id}
+              itemLabel={(u) => u.full_name}
+              itemSearch={(u) => `${u.full_name} ${u.username}`}
+              renderItem={(u) => <UserOption u={u} lang={lang} />}
+              leadingIcon="userRoundSearch"
+              ariaLabel={both("Target user (optional)", "المستخدم المستهدف (اختياري)")}
+              placeholder={pick(lang, "Select user (optional)", "اختر مستخدماً (اختياري)")}
+              clearable
+              lang={lang}
+            />
+          </label>
+
+          <label className="rl-field">
+            <span className="rl-field__label">
+              <Icon name="activity" size={14} />
+              <T en="Activity" ar="النشاط" />
+              <span className="rl-field__opt">({pick(lang, "optional", "اختياري")})</span>
+            </span>
+            <Combo
+              items={activities}
+              value={activityId}
+              onChange={(id) => setActivityId(id)}
+              itemKey={(a) => a.id}
+              itemLabel={(a) => a.name}
+              itemSearch={(a) => `${a.name} ${a.activity_type}`}
+              renderItem={(a) => (
+                <span className="rl-opt">
+                  <span className="rl-opt__main">{a.name}</span>
+                  <span className="rl-opt__sec">
+                    <span>{a.activity_type}</span>
+                    <span>·</span>
+                    <span>{pick(lang, "group mode", "نمط المجموعة")}: {String(a.group_mode ?? "—")}</span>
                   </span>
-                  {v.decided_at ? (
-                    <Badge variant="blue">decided at {v.decided_at.label}</Badge>
-                  ) : (
-                    <span className="muted">not set</span>
-                  )}
-                </div>
-              ))}
-            </>
-          )}
+                </span>
+              )}
+              leadingIcon="activity"
+              ariaLabel={both("Activity (optional)", "النشاط (اختياري)")}
+              placeholder={
+                activities.length
+                  ? pick(lang, "Select activity (optional)", "اختر نشاطاً (اختياري)")
+                  : pick(lang, "No activities in this context", "لا أنشطة في هذا السياق")
+              }
+              clearable
+              disabled={activities.length === 0}
+              lang={lang}
+            />
+          </label>
 
-          <ReasonList
-            reasons={result.reasons}
-            tone={result.verdict === "allowed" ? "ok" : "error"}
-            title="Reasons"
-          />
-        </div>
-      )}
-
-      <div className="panel">
-        <div className="panel__title">Compare personas — side by side</div>
-        <div className="form-row">
-          <label>Compare:</label>
-          <UserSelect value={compareA} onChange={setCompareA} ariaLabel="Compare actor A" />
-          <span>vs</span>
-          <UserSelect value={compareB} onChange={setCompareB} ariaLabel="Compare actor B" />
-          <button
-            className="btn btn--primary"
-            onClick={runCompare}
-            disabled={!compareA || !compareB || !capability || !contextId || comparing}
-          >
-            {comparing ? "Checking…" : "Run both"}
-          </button>
-        </div>
-        <div className="muted">uses the capability/context/target chosen above</div>
-      </div>
-
-      {(comparing || compareResult) && (
-        <div className="panel">
-          <div className="panel__title">Side-by-side result</div>
-          {!comparing &&
-            compareResult?.a?.result &&
-            compareResult?.b?.result &&
-            compareResult.a.result.verdict !== compareResult.b.result.verdict && (
-              <div className="banner-info">
-                Same question, different person: {compareResult.a.name} is{" "}
-                {compareResult.a.result.verdict}, {compareResult.b.name} is{" "}
-                {compareResult.b.result.verdict} — the difference is the{" "}
-                {firstDivergentGate(compareResult.a.result, compareResult.b.result)} gate.
-              </div>
-            )}
-          <div className="compare-grid">
-            <CompareColumn name={compareResult?.a?.name ?? nameA} col={compareResult?.a} loading={comparing} />
-            <CompareColumn name={compareResult?.b?.name ?? nameB} col={compareResult?.b} loading={comparing} />
+          <div className="rl-field rl-field--check">
+            <Btn
+              variant="primary"
+              icon={state === "loading" ? "loader" : "search"}
+              disabled={!canCheck}
+              onClick={() => submit()}
+              aria-label={both("Check", "تحقق")}
+            >
+              {state === "loading" ? pick(lang, "Checking", "جارٍ التحقق") : pick(lang, "Check", "تحقق")}
+            </Btn>
           </div>
         </div>
-      )}
+
+        {/* advanced: simulate role + action (real payload fields) */}
+        <div className="rl-adv">
+          <button
+            type="button"
+            className="rl-adv__toggle"
+            aria-expanded={advanced}
+            onClick={() => setAdvanced((a) => !a)}
+          >
+            <Icon name={advanced ? "chevronUp" : "chevronDown"} size={15} />
+            <T en="Advanced (simulate role · action)" ar="متقدم (محاكاة دور · إجراء)" />
+          </button>
+          {advanced && (
+            <div className="rl-adv__row">
+              <label className="rl-field">
+                <span className="rl-field__label">
+                  <Icon name="userRound" size={14} />
+                  <T en="Simulate role" ar="محاكاة دور" />
+                </span>
+                <select
+                  className="rl-select"
+                  value={simulateRoleId ?? ""}
+                  onChange={(e) => setSimulateRoleId(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">{pick(lang, "— none —", "— لا شيء —")}</option>
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} ({r.short_name})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="rl-field">
+                <span className="rl-field__label">
+                  <Icon name="alignLeft" size={14} />
+                  <T en="Action" ar="الإجراء" />
+                </span>
+                <input
+                  className="rl-input"
+                  value={action}
+                  onChange={(e) => setAction(e.target.value)}
+                  placeholder={pick(lang, "optional action label", "وسم إجراء اختياري")}
+                  dir="ltr"
+                />
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* principal vs subject honesty note */}
+        <div className="rl-idnote">
+          <Icon name="info" size={14} />
+          <span>
+            {pick(lang, "Signed in as", "مسجّل الدخول كـ")} <strong>{principalName ?? "—"}</strong>
+            {isOtherSubject && (
+              <>
+                {" · "}
+                {pick(lang, "checking permissions for", "فحص الصلاحيات لـ")} <strong>{actorName ?? "—"}</strong>
+                {" — "}
+                {pick(lang, "inspecting another user requires ", "فحص مستخدم آخر يتطلب ")}
+                <Tech>user:viewdetails</Tech>
+                {pick(lang, " (enforced by the backend).", " (يفرضه الخادم).")}
+              </>
+            )}
+          </span>
+        </div>
+      </SectionCard>
+
+      {/* ---- verdict + evidence ---- */}
+      <div className="rl-result-grid">
+        <SectionCard icon="shieldCheck" tone="green" title="Verdict" titleAr="النتيجة">
+          <VerdictCard
+            state={state}
+            result={result}
+            error={error}
+            actorName={actorName}
+            capability={result ? capability : null}
+            lang={lang}
+            onRetry={() => submit()}
+          />
+        </SectionCard>
+
+        <SectionCard icon="folderTree" tone="blue" title="Evidence" titleAr="الأدلة">
+          {state === "loading" ? (
+            <SkeletonRows lines={5} />
+          ) : result ? (
+            <EvidencePanel result={result} lang={lang} />
+          ) : state === "error" ? (
+            <EmptyState icon="triangleAlert" en="The check did not complete." ar="لم يكتمل الفحص." compact />
+          ) : (
+            <EmptyState
+              icon="fileSearch"
+              en="No evidence yet."
+              ar="لا أدلة بعد."
+              hint={pick(lang, "Run a check to see the gate-by-gate evidence.", "شغّل فحصاً لعرض الأدلة بوابةً بوابة.")}
+              compact
+            />
+          )}
+        </SectionCard>
+      </div>
+
+      {/* ---- side comparison ---- */}
+      <SectionCard
+        icon="scale"
+        tone="blue"
+        title="Side comparison"
+        titleAr="مقارنة جانبية"
+        actions={
+          <div className="rl-compare__pick">
+            <Combo
+              items={users.filter((u) => u.id !== actorId)}
+              value={compareBId}
+              onChange={(id) => setCompareBId(id)}
+              itemKey={(u) => u.id}
+              itemLabel={(u) => u.full_name}
+              itemSearch={(u) => `${u.full_name} ${u.username}`}
+              renderItem={(u) => <UserOption u={u} lang={lang} />}
+              leadingIcon="userRound"
+              ariaLabel={both("Compare with", "قارن مع")}
+              placeholder={pick(lang, "Compare with…", "قارن مع…")}
+              lang={lang}
+            />
+            <Btn variant="outline" icon="scale" size="sm" disabled={!compareBId || !capability || !contextId || comparing} onClick={runCompare}>
+              {comparing ? pick(lang, "Comparing", "جارٍ المقارنة") : pick(lang, "Compare actors", "مقارنة الممثلين")}
+            </Btn>
+          </div>
+        }
+      >
+        {compare || comparing ? (
+          <div className="rl-compare">
+            <CompareColumn name={actorName ?? pick(lang, "Actor A", "الممثل أ")} col={compare?.a} loading={comparing} lang={lang} />
+            <div className="rl-compare__vs" aria-hidden="true">
+              <Icon name="arrowLeftRight" size={18} />
+            </div>
+            <CompareColumn name={compareBName} col={compare?.b} loading={comparing} lang={lang} />
+          </div>
+        ) : (
+          <EmptyState
+            icon="scale"
+            en="Compare two actors on the same capability and context."
+            ar="قارن ممثلَين على الصلاحية والسياق نفسيهما."
+            hint={pick(lang, "Real checks — each subject is authorized independently.", "فحوص حقيقية — كل موضوع يُصرَّح له بشكل مستقل.")}
+            compact
+          />
+        )}
+      </SectionCard>
+
+      {/* ---- recent decision log ---- */}
+      <SectionCard icon="clipboardClock" tone="orange" title="Recent decision log" titleAr="سجل القرارات الأخيرة">
+        {decisions.length === 0 ? (
+          <EmptyState icon="clipboardClock" en="No permission decisions recorded yet." ar="لم تُسجَّل أي قرارات بعد." compact />
+        ) : (
+          <ul className="rl-reclog">
+            {decisions.map((d) => {
+              const who = userById(users, d.actor_id)?.full_name ?? `#${d.actor_id}`;
+              const ctx = findCtx(contexts, d.context_id);
+              return (
+                <li key={d.id} className="rl-reclog__row">
+                  <ResultBadge allowed={d.allowed} size={13} lang={lang} />
+                  <span className="rl-reclog__cap">
+                    <Tech>{d.capability}</Tech>
+                  </span>
+                  <span className="rl-reclog__who">{who}</span>
+                  <span className="rl-reclog__ctx">
+                    <Tech>{ctx?.label ?? `ctx:${d.context_id}`}</Tech>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SectionCard>
     </div>
   );
 }

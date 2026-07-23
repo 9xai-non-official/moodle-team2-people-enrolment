@@ -37,14 +37,6 @@ export const SCRIPT = {
     "Open CS101 → Assignment 1 → type text, attach an image, tick the statement, Submit — it locks, like Moodle.",
     "Quiz 1 → start attempt → answer → Finish: auto-marked instantly, essay 'awaiting marking'.",
   ],
-  Admin: [
-    "Overview strip: pending course requests jump straight to Teaching → New course.",
-    "As admin1: create an account — it signs in IMMEDIATELY (no confirm email; that gate is self-registration's only).",
-    "'make manager' grants full site powers at System; revoking your OWN manager role refuses — no self-lockout.",
-    "Suspend an account → its sign-in refuses, yet every roster still lists them (suspension ≠ deletion).",
-    "Courses tab: hide LAB1 → it leaves the catalog untouched inside; delete it → Progress → History still answers (hard case 5).",
-    "Try suspending yourself — refused: no self-lockout.",
-  ],
   Teaching: [
     "As teacher.a: Roster tab — approve Ghada's enrolment request → she lands on the roster via manual enrol.",
     "Promote Basel to non-editing teacher — grade-only role, assignable because it's BELOW teacher.",

@@ -12,7 +12,7 @@ const routes = Object.entries(modules)
   .filter(([file]) => !file.endsWith("/index.js") && !file.endsWith("/seed.js"))
   .flatMap(([, mod]) => (Array.isArray(mod.routes) ? mod.routes : []));
 
-export async function mockRequest(method, path, body) {
+export async function mockRequest(method, path, body, ctx) {
   const [rawPath, rawQuery] = path.split("?");
   const query = Object.fromEntries(new URLSearchParams(rawQuery || ""));
   for (const route of routes) {
@@ -21,7 +21,10 @@ export async function mockRequest(method, path, body) {
     if (!match) continue;
     // tiny latency so loading states are visible in the demo
     await new Promise((r) => setTimeout(r, 120));
-    return { data: route.handler(match, body, query) };
+    // ctx carries the acting principal (the X-Acting-User equivalent) so
+    // principal-relative routes (/assignable, other-user /check) enforce the
+    // same authorization the real backend does.
+    return { data: route.handler(match, body, query, ctx ?? {}) };
   }
   return null; // no mock — caller falls through to the real API
 }

@@ -1,50 +1,53 @@
-// Enrolment method instances (task 06 §4.2): one .panel per method, with
-// enable/disable, cohort sync, and remove. Every mutation refetches — no
-// optimistic UI. Remove deletes only this path's enrolments (HC-1).
-//
-// EXPIRY / CAPACITY CONFIGURATION
-// Only what the backend actually honours is editable here. Phase F asked for
-// four fields; three of them do not exist in the contract, and shipping inputs
-// that silently do nothing is worse than not shipping them:
-//
-//   max_enrolled   SUPPORTED — the capacity gate reads config.max_enrolled
-//                  (services/enrolment.py:435-444). Self-enrol only: that is
-//                  the sole path the gate chain runs on.
-//   enrol_start /  SUPPORTED — real MethodOut columns, accepted by
-//   enrol_end      MethodPatch. This is the "enrolment period".
-//   expiredaction  NOT IN CONTRACT — no reference anywhere in app/.
-//   longtimenosee  NOT IN CONTRACT — schemas_enrolment.py:27 mentions an
-//                  `inactivity_days` config key, but no service code reads it,
-//                  so it is a comment rather than a feature.
-//
-// The two missing ones are requested in the Phase F handover. Do not add
-// inputs for them until a backend engineer confirms they are read.
+// Methods tab (spec §40-44, §47). One card per enrolment-method instance with
+// its status, default role, cohort, window, config indication (never the raw
+// key), and enrolment count. Actions gate on the backend: enable/disable, sync
+// (cohort only), view enrolments, edit, delete. Sync shows the real SyncResult
+// counts; delete carries a strong last-path warning. Every write refetches.
 import { useEffect, useState } from "react";
-import { apiGet, apiPatch, apiPost, apiDelete } from "../../api";
-import Badge from "../common/Badge";
+import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "../../api";
+import { useLang } from "../../context/Lang";
+import ReasonList from "../common/ReasonList";
+import Icon from "./icons";
 import MethodCreateForm from "./MethodCreateForm";
-import GuestPreview from "./GuestPreview";
+import {
+  ActionsMenu,
+  Avatar,
+  Dialog,
+  EmptyState,
+  ScopedError,
+  Spinner,
+  T,
+  both,
+  fmtDate,
+  methodMeta,
+  roleMeta,
+} from "./ui";
 
-// datetime-local wants "YYYY-MM-DDTHH:mm"; the API returns ISO-8601.
-const toLocal = (iso) => (iso ? String(iso).slice(0, 16) : "");
+const NODE_TONE = { manual: "green", self: "orange", cohort: "blue", guest: "purple" };
 
-// A window that is already set CANNOT be cleared through the API:
-// update_method builds `enrol_start = coalesce($4, enrol_start)`
-// (services/enrolment.py:597-598), so a null means "leave it alone", not
-// "unset it". PATCH still returns 200, so a cleared field looks saved and
-// silently is not. VERIFIED: set 2030-01-01, PATCH null, value unchanged.
-//
-// Rather than ship a control that lies, we detect the case and say so.
-// Fix belongs in the backend (exclude_unset, or a sentinel for "clear").
-const clearsExisting = (m, d) =>
-  (!!m.enrol_start && !d.enrol_start) || (!!m.enrol_end && !d.enrol_end);
+function MethodStatus({ status }) {
+  const on = status === "enabled";
+  return (
+    <span className={`enr-badge enr-badge--${on ? "green" : "orange"}`}>
+      <Icon name={on ? "circleCheck" : "circleMinus"} size={14} />
+      {on ? <T en="Enabled" ar="مفعّلة" /> : <T en="Disabled" ar="معطّلة" />}
+    </span>
+  );
+}
 
 export default function MethodsPanel({ courseId }) {
+  const { lang, dir } = useLang();
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const [actionReasons, setActionReasons] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [syncResult, setSyncResult] = useState({}); // method id → {added,removed,kept}
+  const [syncResult, setSyncResult] = useState({});
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null); // method whose enrolments to list
+  const [deleting, setDeleting] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -54,207 +57,320 @@ export default function MethodsPanel({ courseId }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
-
-  useEffect(load, [courseId]);
+  useEffect(load, [courseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = (promise, after) => {
     setBusy(true);
-    setError(null);
+    setActionError(null);
+    setActionReasons(null);
     promise
       .then((res) => {
-        if (after) after(res);
+        after?.(res);
         load();
       })
-      // Server reason, not just the transport line.
-      .catch((e) =>
-        setError(e.reasons?.length ? e.reasons.join(" · ") : e.message),
-      )
+      .catch((e) => {
+        // Surface the backend's prescriptive reasons verbatim (e.g. the R-COHORT
+        // 409 "suspend it first, or remove the user from the cohort") — a
+        // single-line message would lose multi-reason refusals (spec §51, §3).
+        if (e instanceof ApiError && e.reasons?.length) setActionReasons(e.reasons);
+        else setActionError(e.message);
+      })
       .finally(() => setBusy(false));
   };
 
-  // Per-method draft edits, keyed by method id. Absent = not being edited.
-  const [draft, setDraft] = useState({});
-  const editing = (m) =>
-    draft[m.id] ?? {
-      enrol_start: toLocal(m.enrol_start),
-      enrol_end: toLocal(m.enrol_end),
-      max_enrolled: m.config?.max_enrolled ?? "",
-    };
-  const edit = (m, patch) =>
-    setDraft((d) => ({ ...d, [m.id]: { ...editing(m), ...patch } }));
+  const doDelete = () => {
+    const m = deleting;
+    setDeleting(null);
+    run(apiDelete(`/api/enrolment/methods/${m.id}`));
+  };
 
-  const saveConfig = (m) => {
-    const d = editing(m);
-    const body = {
-      enrol_start: d.enrol_start || null,
-      enrol_end: d.enrol_end || null,
-    };
-    if (m.method === "self") {
-      // Merge, never replace: config also carries `key` and `sync_group_id`,
-      // and PATCH overwrites the whole object.
-      body.config = {
-        ...(m.config ?? {}),
-        max_enrolled: d.max_enrolled === "" ? null : Number(d.max_enrolled),
-      };
-    }
-    run(apiPatch(`/api/enrolment/methods/${m.id}`, body), () =>
-      setDraft((s) => {
-        const { [m.id]: _drop, ...rest } = s;
-        return rest;
-      }),
-    );
+  const menuItems = (m) => {
+    const items = [
+      { kind: "item", icon: "pencil", label: "Edit", ar: "تعديل", onSelect: () => setEditing(m) },
+      m.status === "enabled"
+        ? {
+            kind: "item",
+            icon: "pauseCircle",
+            label: "Disable",
+            ar: "تعطيل",
+            disabled: busy,
+            onSelect: () => run(apiPatch(`/api/enrolment/methods/${m.id}`, { status: "disabled" })),
+          }
+        : {
+            kind: "item",
+            icon: "playCircle",
+            label: "Enable",
+            ar: "تفعيل",
+            disabled: busy,
+            onSelect: () => run(apiPatch(`/api/enrolment/methods/${m.id}`, { status: "enabled" })),
+          },
+      m.method === "cohort"
+        ? {
+            kind: "item",
+            icon: "refreshCw",
+            label: "Sync now",
+            ar: "مزامنة الآن",
+            disabled: busy,
+            onSelect: () =>
+              run(apiPost(`/api/enrolment/methods/${m.id}/sync`), (r) =>
+                setSyncResult((s) => ({ ...s, [m.id]: r })),
+              ),
+          }
+        : null,
+      { kind: "item", icon: "eye", label: "View enrolments", ar: "عرض التسجيلات", onSelect: () => setViewing(m) },
+      { kind: "sep" },
+      { kind: "item", icon: "trash2", label: "Delete", ar: "حذف", danger: true, onSelect: () => setDeleting(m) },
+    ];
+    return items;
   };
 
   return (
-    <div>
-      <div className="panel__title">Enrolment methods</div>
-      <MethodCreateForm courseId={courseId} onCreated={load} />
+    <section className="enr-card">
+      <header className="enr-card__head">
+        <span className="enr-card__ic enr-card__ic--blue">
+          <Icon name="workflow" size={19} />
+        </span>
+        <h2 className="enr-card__title">
+          <T en="Enrolment methods" ar="طرق التسجيل" />
+        </h2>
+        <div className="enr-card__actions">
+          <button type="button" className="enr-btn enr-btn--primary" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={16} />
+            <T en="Add method" ar="إضافة طريقة" />
+          </button>
+        </div>
+      </header>
 
-      {loading && <p className="muted">Loading…</p>}
-      {!loading && error && <div className="error-banner">{error}</div>}
-      {!loading && !error && !methods.length && (
-        <p className="muted">No enrolment methods.</p>
-      )}
+      <div className="enr-card__body">
+        {actionReasons && (
+          <ReasonList reasons={actionReasons} tone="error" title={both("Action refused", "تعذّر الإجراء")} />
+        )}
+        {actionError && <ScopedError message={actionError} onRetry={() => setActionError(null)} lang={lang} />}
+        {loading && <Spinner lang={lang} />}
+        {!loading && error && <ScopedError message={error} onRetry={load} lang={lang} />}
+        {!loading && !error && methods.length === 0 && (
+          <EmptyState icon="workflow" en="No enrolment methods on this course." ar="لا توجد طرق تسجيل في هذا المقرر." />
+        )}
 
-      {!loading &&
-        !error &&
-        methods.map((m) => {
-        const res = syncResult[m.id];
-        return (
-          <div className="panel" key={m.id}>
-            <div className="panel__title">
-              {m.method}{" "}
-              <Badge variant={m.status === "enabled" ? "green" : "grey"}>
-                {m.status}
-              </Badge>
-              <span className="muted"> · {m.enrolled_count} enrolled</span>
-            </div>
+        {!loading && !error && methods.length > 0 && (
+          <div className="enr-methods">
+            {methods.map((m) => {
+              const mm = methodMeta(m.method);
+              const tone = NODE_TONE[m.method] ?? "grey";
+              const res = syncResult[m.id];
+              const rm = m.default_role ? roleMeta(m.default_role.short_name) : null;
+              return (
+                <article className="enr-method" key={m.id}>
+                  <div className="enr-method__top">
+                    <span className={`enr-method__ic enr-method__ic--${tone}`}>
+                      <Icon name={mm.icon} size={20} />
+                    </span>
+                    <div className="enr-method__head">
+                      <div className="enr-method__name">
+                        <T en={mm.en} ar={mm.ar} />
+                      </div>
+                      <div className="enr-method__sub">
+                        <MethodStatus status={m.status} />
+                        <span className="enr-muted">
+                          <Icon name="users" size={13} /> {m.enrolled_count}{" "}
+                          <T en="enrolled" ar="مسجّل" />
+                        </span>
+                      </div>
+                    </div>
+                    <ActionsMenu
+                      label={both(`Actions for the ${mm.en} method`, `إجراءات طريقة ${mm.ar || mm.en}`)}
+                      items={menuItems(m)}
+                      lang={lang}
+                    />
+                  </div>
 
-            {m.method === "self" && (
-              <div className="muted">
-                Enrolment key: <code>{m.config?.key || "—"}</code>
-              </div>
-            )}
-            {m.cohort && <div className="muted">Cohort: {m.cohort.name}</div>}
+                  <dl className="enr-method__facts">
+                    {rm && (
+                      <div>
+                        <dt><T en="Default role" ar="الدور الافتراضي" /></dt>
+                        <dd><Icon name={rm.icon} size={14} /> <T en={rm.en} ar={rm.ar} /></dd>
+                      </div>
+                    )}
+                    {m.cohort && (
+                      <div>
+                        <dt><T en="Cohort" ar="الفوج" /></dt>
+                        <dd><Icon name="usersRound" size={14} /> {m.cohort.name}</dd>
+                      </div>
+                    )}
+                    {m.method === "self" && (
+                      <div>
+                        <dt><T en="Key" ar="المفتاح" /></dt>
+                        <dd>
+                          {m.config?.key ? (
+                            <span className="enr-badge enr-badge--xs enr-badge--amber">
+                              <Icon name="lock" size={12} /> <T en="Key required" ar="مفتاح مطلوب" />
+                            </span>
+                          ) : (
+                            <span className="enr-muted"><T en="No key" ar="بدون مفتاح" /></span>
+                          )}
+                        </dd>
+                      </div>
+                    )}
+                    {m.method === "guest" && (
+                      <div>
+                        <dt><T en="Password" ar="كلمة المرور" /></dt>
+                        <dd>
+                          {m.config?.key ? (
+                            <span className="enr-badge enr-badge--xs enr-badge--amber">
+                              <Icon name="lock" size={12} /> <T en="Required" ar="مطلوبة" />
+                            </span>
+                          ) : (
+                            <span className="enr-muted"><T en="None" ar="لا شيء" /></span>
+                          )}
+                        </dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt><T en="Start" ar="البداية" /></dt>
+                      <dd>{fmtDate(m.enrol_start, lang)}</dd>
+                    </div>
+                    <div>
+                      <dt><T en="End" ar="النهاية" /></dt>
+                      <dd>{fmtDate(m.enrol_end, lang)}</dd>
+                    </div>
+                  </dl>
 
-            <div className="form-row">
-              <button
-                className="btn"
-                disabled={busy}
-                onClick={() =>
-                  run(
-                    apiPatch(`/api/enrolment/methods/${m.id}`, {
-                      status: m.status === "enabled" ? "disabled" : "enabled",
-                    }),
-                  )
-                }
-              >
-                {m.status === "enabled" ? "Disable" : "Enable"}
-              </button>
-              {m.method === "cohort" && (
-                <button
-                  className="btn"
-                  disabled={busy}
-                  onClick={() =>
-                    run(apiPost(`/api/enrolment/methods/${m.id}/sync`), (r) =>
-                      setSyncResult((s) => ({ ...s, [m.id]: r })),
-                    )
-                  }
-                >
-                  Sync now
-                </button>
-              )}
-              <button
-                className="btn btn--danger"
-                disabled={busy}
-                onClick={() =>
-                  window.confirm(
-                    `Remove the ${m.method} method?\n\nEveryone enrolled ONLY via this ` +
-                    "method leaves the course (their completion records survive). " +
-                    "People with another path stay enrolled — that's hard case #1.",
-                  ) && run(apiDelete(`/api/enrolment/methods/${m.id}`))
-                }
-              >
-                Remove method
-              </button>
-            </div>
-            <div className="muted">
-              Removes only this path’s enrolments — HC-1.
-            </div>
-
-            {/* INSUFFICIENT EVIDENCE — requires staging inspection.
-                Rendered inline under each method as a plain form-row, matching
-                the surrounding panels. Whether these belong inline, behind a
-                "Configure" disclosure, or in the create form only, is not
-                decidable from the code. Field SET is contract-driven, not a
-                guess; only the LAYOUT is uncertain. */}
-            <div className="form-row">
-              <label>Enrol from</label>
-              <input
-                className="input"
-                type="datetime-local"
-                value={editing(m).enrol_start}
-                onChange={(e) => edit(m, { enrol_start: e.target.value })}
-              />
-              <label>until</label>
-              <input
-                className="input"
-                type="datetime-local"
-                value={editing(m).enrol_end}
-                onChange={(e) => edit(m, { enrol_end: e.target.value })}
-              />
-              {m.method === "self" && (
-                <>
-                  <label>Max enrolled</label>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    style={{ width: "7rem" }}
-                    placeholder="unlimited"
-                    value={editing(m).max_enrolled ?? ""}
-                    onChange={(e) => edit(m, { max_enrolled: e.target.value })}
-                  />
-                </>
-              )}
-              <button
-                className="btn"
-                disabled={busy || !draft[m.id]}
-                onClick={() => saveConfig(m)}
-              >
-                Save
-              </button>
-            </div>
-            {draft[m.id] && clearsExisting(m, editing(m)) && (
-              <div className="banner-info">
-                Clearing a date that is already set will not take effect — the
-                API treats an empty value as “leave unchanged”, so the save
-                will report success and the window will stay as it is. Other
-                edits in this row still save normally.
-              </div>
-            )}
-            <div className="muted">
-              The window feeds the <code>window_open</code> gate
-              {m.method === "self" && (
-                <>
-                  ; max enrolled feeds <code>capacity</code>
-                </>
-              )}
-              . Expiry action and long-time-no-see are not implemented in the
-              backend and are deliberately not shown.
-            </div>
-
-            {res && (
-              <div className="banner-info">
-                Sync: +{res.added.length} added · −{res.removed.length} removed ·{" "}
-                {res.kept.length} kept
-              </div>
-            )}
+                  {res && (
+                    <div className={`enr-sync ${res.skipped ? "enr-sync--warn" : "enr-sync--ok"}`}>
+                      <Icon name={res.skipped ? "info" : "circleCheck"} size={15} />
+                      {res.skipped ? (
+                        <T en={`Sync skipped — ${res.reason ?? "no changes"}`} ar={`تم تخطي المزامنة — ${res.reason ?? "لا تغييرات"}`} />
+                      ) : (
+                        <T
+                          en={`Sync done · +${res.added.length} added · ${res.kept.length} kept · −${res.removed.length} removed`}
+                          ar={`تمت المزامنة · +${res.added.length} مضاف · ${res.kept.length} مُبقى · −${res.removed.length} مُزال`}
+                        />
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
-        );
-      })}
+        )}
+      </div>
 
-      <GuestPreview courseId={courseId} />
-    </div>
+      {/* Add method */}
+      <Dialog open={adding} onClose={() => setAdding(false)} dir={dir} icon="plus" title="Add enrolment method" titleAr="إضافة طريقة تسجيل" size="lg">
+        <MethodCreateForm
+          courseId={courseId}
+          onCancel={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+        />
+      </Dialog>
+
+      {/* Edit method */}
+      <Dialog open={!!editing} onClose={() => setEditing(null)} dir={dir} icon="pencil" title="Edit enrolment method" titleAr="تعديل طريقة التسجيل" size="lg">
+        {editing && (
+          <MethodCreateForm
+            courseId={courseId}
+            method={editing}
+            onCancel={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null);
+              load();
+            }}
+          />
+        )}
+      </Dialog>
+
+      {/* View enrolments */}
+      <Dialog
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        dir={dir}
+        icon="eye"
+        title="Method enrolments"
+        titleAr="تسجيلات الطريقة"
+        size="lg"
+      >
+        {viewing && <MethodEnrolments methodId={viewing.id} lang={lang} />}
+      </Dialog>
+
+      {/* Delete method */}
+      <Dialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        dir={dir}
+        icon="triangleAlert"
+        variant="danger"
+        title="Delete enrolment method?"
+        titleAr="حذف طريقة التسجيل؟"
+        footer={
+          <>
+            <button type="button" className="enr-btn" onClick={() => setDeleting(null)}>
+              <T en="Cancel" ar="إلغاء" />
+            </button>
+            <button type="button" className="enr-btn enr-btn--danger" onClick={doDelete}>
+              <Icon name="trash2" size={15} />
+              <T en="Delete method" ar="حذف الطريقة" />
+            </button>
+          </>
+        }
+      >
+        {deleting && (
+          <div className="enr-confirm">
+            <p className="enr-confirm__note enr-confirm__note--warn">
+              <Icon name="triangleAlert" size={16} />
+              <T
+                en={`The ${methodMeta(deleting.method).en} method will be removed. Each enrolment through it is unenrolled: users with no other valid path leave the course roster; users with another path stay enrolled. Completion records are kept.`}
+                ar={`ستُزال طريقة ${methodMeta(deleting.method).ar || methodMeta(deleting.method).en}. سيُلغى كل تسجيل عبرها: من ليس له مسار آخر يغادر القائمة، ومن له مسار آخر يبقى مسجّلاً. تُحفظ سجلات الإنجاز.`}
+              />
+            </p>
+            <p className="enr-muted">
+              <T
+                en={`${deleting.enrolled_count} enrolment${deleting.enrolled_count === 1 ? "" : "s"} go through this method.`}
+                ar={`${deleting.enrolled_count} تسجيل عبر هذه الطريقة.`}
+              />
+            </p>
+          </div>
+        )}
+      </Dialog>
+    </section>
+  );
+}
+
+function MethodEnrolments({ methodId, lang }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    apiGet(`/api/enrolment/methods/${methodId}/enrolments`)
+      .then(setRows)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, [methodId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <Spinner lang={lang} />;
+  if (error) return <ScopedError message={error} onRetry={load} lang={lang} />;
+  if (!rows.length)
+    return <EmptyState icon="users" en="No enrolments through this method." ar="لا توجد تسجيلات عبر هذه الطريقة." />;
+
+  return (
+    <ul className="enr-mlist">
+      {rows.map((r) => (
+        <li key={r.enrolment_id} className="enr-mlist__row">
+          <Avatar name={r.full_name} size={32} />
+          <span className="enr-mlist__name">{r.full_name}</span>
+          <span
+            className={`enr-badge enr-badge--xs enr-badge--${r.status === "active" ? "green" : "orange"}`}
+          >
+            {r.status === "active" ? <T en="active" ar="نشط" /> : <T en="suspended" ar="موقوف" />}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -1,51 +1,109 @@
-// Demos — the Thursday-demo control room. The story: five hard cases, five
-// proofs, run one live. Four of the cases live on their own pages; HC-2 (the
-// one with no home elsewhere) runs live right here, so it leads the page.
-import PageIntro from "../components/common/PageIntro";
-import HardCaseCard from "../components/demos/HardCaseCard";
+// Demos — an interactive rule-verification workspace. Not a gallery of pretty
+// sample data: each hard case runs REAL API calls and shows WHY the result
+// happened. HC2 runs live (it really unenrols + re-enrols, with confirmation
+// and recovery); HC1/HC3/HC4 are read-only proofs. The page reuses the shared
+// shell/theme/language — it only owns its own reading direction, because the
+// shell forces .content to LTR for every page except the Dashboard.
+import { useState } from "react";
+import { useLang } from "../context/Lang";
+import ScenarioTabs from "../components/demos/ScenarioTabs";
+import HC1Paths from "../components/demos/HC1Paths";
 import HC2DropReturn from "../components/demos/HC2DropReturn";
+import HC3Scope from "../components/demos/HC3Scope";
+import HC4Groups from "../components/demos/HC4Groups";
 
-const CARDS = [
+const SCENARIOS = [
   {
-    title: "HC-1 · Two ways into one course",
-    see: "You'll see: two enrolment paths, remove one, still enrolled.",
-    rule: "A student with two enrolment paths stays enrolled when you remove just one — membership is the OR of live paths. Open a participant's paths drawer.",
-    target: "Enrolment",
+    id: "HC1",
+    accent: "blue",
+    icon: "gitBranch",
+    en: "Manual + cohort",
+    ar: "يدوي + فوج",
+    descEn: "Two enrolment paths — remove one, still enrolled.",
+    descAr: "مساران للتسجيل — احذف واحدًا، يبقى مسجّلًا.",
   },
   {
-    title: "HC-3 · An override subtracts one capability",
-    see: "You'll see: the same role say yes everywhere but no in one context.",
-    rule: "A role override can deny a capability in one context while the role keeps it everywhere else. Run the one-click checks in the Permission Checker.",
-    target: "Roles",
+    id: "HC2",
+    accent: "orange",
+    icon: "repeat",
+    en: "Drop and return",
+    ar: "الانسحاب والعودة",
+    descEn: "Access changes, historical progress does not.",
+    descAr: "يتغيّر الوصول، لا يتغيّر التقدّم السابق.",
   },
   {
-    title: "HC-4 · Separate groups wall off visibility",
-    see: "You'll see: two TAs on one course, two different rosters.",
-    rule: "In separate group mode a non-privileged teacher/TA sees only their own group's members. Compare on the Groups board.",
-    target: "Groups",
+    id: "HC3",
+    accent: "blue",
+    icon: "clipboardCheck",
+    en: "TA group marking",
+    ar: "تقييم مجموعات المساعد",
+    descEn: "A TA grades only the groups scope allows.",
+    descAr: "يقيّم المساعد المجموعات التي يسمح بها نطاقه.",
   },
   {
-    title: "HC-5 · Deleted user, surviving history",
-    see: "You'll see: gone from every roster, still present in history.",
-    rule: "A deleted user drops off every roster but their completion history is still served from snapshots. Find them in History.",
-    target: "Progress",
+    id: "HC4",
+    accent: "blue",
+    icon: "combine",
+    en: "Two groups",
+    ar: "مجموعتان",
+    descEn: "Membership of two groups gives the correct union.",
+    descAr: "عضوية مجموعتين تمنح الاتحاد الصحيح.",
   },
 ];
 
+const STORE_KEY = "demos-scenario";
+const VALID = new Set(SCENARIOS.map((s) => s.id));
+
+function readInitial() {
+  try {
+    const v = localStorage.getItem(STORE_KEY);
+    return VALID.has(v) ? v : "HC2";
+  } catch {
+    return "HC2";
+  }
+}
+
+const PANEL_ID = "dm-workspace";
+
 export default function DemosPage({ onNavigate }) {
+  const { lang, dir } = useLang();
+  const [active, setActive] = useState(readInitial);
+
+  function choose(id) {
+    setActive(id);
+    try {
+      localStorage.setItem(STORE_KEY, id);
+    } catch {
+      /* private mode — selection just won't persist across reloads */
+    }
+  }
+
+  const common = { lang, dir, onNavigate };
+
   return (
-    <div>
-      <h1>Hard-case demos</h1>
-      <PageIntro line="Five hard cases from the brief — four live on their pages, one runs live right here." />
+    <div className="demos" dir={dir} lang={lang}>
+      <header className="demos__head">
+        <h1 className="demos__title">
+          <span className="demos__title-en">Demos</span>
+          <span className="demos__title-ar" lang="ar">
+            العروض التجريبية
+          </span>
+        </h1>
+        <p className="demos__lede">
+          <span>Prove the rules, not just the happy path</span>
+          <span className="demos__lede-ar" lang="ar">
+            أثبت القواعد، وليس المسار السهل فقط
+          </span>
+        </p>
+      </header>
 
-      <HC2DropReturn />
+      <ScenarioTabs scenarios={SCENARIOS} active={active} onChange={choose} panelId={PANEL_ID} lang={lang} dir={dir} />
 
-      <h2>The other four hard cases</h2>
-      <p className="muted">Each card jumps to where that hard case already lives.</p>
-      <div className="grid-cards">
-        {CARDS.map((c) => (
-          <HardCaseCard key={c.title} {...c} onNavigate={onNavigate} />
-        ))}
+      <div id={PANEL_ID} role="tabpanel" aria-labelledby={`dm-tab-${active}`} className="dm-workspace">
+        {active === "HC1" && <HC1Paths {...common} />}
+        {active === "HC2" && <HC2DropReturn {...common} />}
+        {active === "HC3" && <HC3Scope {...common} />}
+        {active === "HC4" && <HC4Groups {...common} />}
       </div>
     </div>
   );

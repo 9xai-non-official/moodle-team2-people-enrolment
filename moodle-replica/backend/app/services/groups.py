@@ -293,16 +293,25 @@ async def list_course_groups(course_id: int, caller_id: int | None = None) -> li
     )
 
 
-async def group_members(group_id: int, caller_id: int | None = None) -> list[dict]:
+async def group_members(group_id: int, caller_id: int | None = None,
+                        *, course_id: int | None = None,
+                        scope: dict | None = None) -> list[dict]:
     """T2-GRP-002/004 — membership rows filtered in SQL by group mode, caller
     scope, and per-group visibility. In separate mode a caller who shares no
     group with the target sees nobody; a MEMBERS group is opaque to non-members;
     OWN shows only the caller themself; NONE hides membership entirely (except
-    accessallgroups)."""
-    course_id = await _group_course_id(group_id)
+    accessallgroups).
+
+    `course_id`/`scope` may be passed by a caller that already resolved them
+    (e.g. my_groups_with_members) so a multi-group read computes the caller's
+    scope — which includes the expensive accessallgroups capability check —
+    ONCE instead of per group."""
     if course_id is None:
-        return []
-    scope = await _caller_scope(caller_id, course_id)
+        course_id = await _group_course_id(group_id)
+        if course_id is None:
+            return []
+    if scope is None:
+        scope = await _caller_scope(caller_id, course_id)
     is_member = group_id in scope["own_ids"]
     return await db.fetch_all(
         """
@@ -345,6 +354,36 @@ async def user_groups(user_id: int, course_id: int) -> list[dict]:
         user_id,
         course_id,
     )
+
+
+async def my_groups_with_members(user_id: int, course_id: int) -> list[dict]:
+    """A student's own groups in one course, each with the members they are
+    allowed to see. The caller is a member of every group returned here, so
+    group_members() applies the normal visibility rules from THAT vantage
+    (separate mode: co-members of a shared group are visible; an OWN group
+    still shows only the caller; a NONE group hides membership). No new
+    visibility logic — this just composes user_groups + group_members."""
+    groups = await db.fetch_all(
+        """
+        select g.id, g.course_id, g.name, g.id_number, g.description,
+               g.participation, g.visibility,
+               (select count(*) from group_member m2 where m2.group_id = g.id)
+                   as member_count
+          from course_group g
+          join group_member m on m.group_id = g.id and m.user_id = $1
+         where g.course_id = $2
+         order by g.name
+        """,
+        user_id,
+        course_id,
+    )
+    # Resolve the caller's scope once (it runs the accessallgroups capability
+    # check) and reuse it for every group, rather than paying it per group.
+    scope = await _caller_scope(user_id, course_id)
+    for g in groups:
+        g["members"] = await group_members(
+            g["id"], caller_id=user_id, course_id=course_id, scope=scope)
+    return groups
 
 
 async def activity_policy(activity_id: int) -> dict | None:

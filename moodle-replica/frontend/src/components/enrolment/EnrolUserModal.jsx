@@ -1,211 +1,269 @@
-// Manual enrolment (task 06 §4.2). Role options come from GET /api/roles
-// (Khaled's domain); default is the manual method's default_role. Backend
-// refusals are shown verbatim via ReasonList — never swallowed.
-//
-// RE-ENROL INTENT
-// Re-enrolling someone who is currently SUSPENDED must not quietly reactivate
-// them — suspension is a deliberate act and undoing it should be too. So the
-// request carries `activate` only when the operator ticks the box, and the
-// field is omitted entirely otherwise rather than sent as false.
-//
-// BLOCKED ON BACKEND: services/enrolment.py:236-241 upserts with a hardcoded
-// `set status = 'active'`, so today EVERY re-enrol reactivates regardless of
-// what this sends, and EnrolRequest (schemas_enrolment.py:40-44) has no
-// `activate` field to receive. The control below expresses the intent and is
-// wired, but it cannot change behaviour until that lands. Raised with the
-// enrolment backend engineer — see the shared-diff request in the handover.
-import { useEffect, useRef, useState } from "react";
+// Manual enrolment (spec §38). Opens from the toolbar "Enrol users" button and
+// from the Other-users panel (prefilled). Fields come from real endpoints:
+// users (/api/users), the course's methods, roles (/api/roles). The default
+// role is the chosen method's default_role. Backend refusals (409 already
+// enrolled, 403 capability, 404 no method) surface verbatim via ReasonList —
+// never swallowed. Accessible dialog: focus trap + Escape + focus restore.
+import { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../../api";
-import Modal from "../common/Modal";
-import UserSelect from "../common/UserSelect";
+import { cachedGet } from "../../lib/catalog";
+import { useLang } from "../../context/Lang";
 import ReasonList from "../common/ReasonList";
+import Icon from "./icons";
+import { Dialog, Switch, T, UserCombo, both, methodMeta, roleMeta } from "./ui";
 
-export default function EnrolUserModal({ open, courseId, onClose, onEnrolled }) {
-  const fieldsRef = useRef(null);
+export default function EnrolUserModal({ open, courseId, presetUserId, onClose, onEnrolled }) {
+  const { dir } = useLang();
+  const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
-  const [method, setMethod] = useState(null);
+  const [methods, setMethods] = useState([]);
   const [userId, setUserId] = useState(null);
+  const [methodId, setMethodId] = useState(null);
   const [roleId, setRoleId] = useState(null);
   const [timeStart, setTimeStart] = useState("");
   const [timeEnd, setTimeEnd] = useState("");
-  const [activate, setActivate] = useState(false); // never defaults to true
+  const [activate, setActivate] = useState(true);
   const [reasons, setReasons] = useState(null);
-  const [failure, setFailure] = useState(null); // the ApiError, for its status
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [methodsLoaded, setMethodsLoaded] = useState(false);
+
+  const method = methods.find((m) => m.id === methodId) || null;
 
   useEffect(() => {
     if (!open) return;
     setReasons(null);
-    setFailure(null);
     setError(null);
-    setUserId(null);
+    setMethodsLoaded(false);
+    setUserId(presetUserId ?? null);
     setTimeStart("");
     setTimeEnd("");
-    setActivate(false); // re-arm on every open: intent is per-action
-    apiGet("/api/roles")
+    setActivate(true);
+    cachedGet("/api/users")
+      .then(setUsers)
+      .catch(() => setUsers([]));
+    cachedGet("/api/roles")
       .then(setRoles)
-      .catch(() => setRoles([])); // fall back to the method's default role below
+      .catch(() => setRoles([]));
     apiGet(`/api/enrolment/courses/${courseId}/methods`)
       .then((ms) => {
-        const manual = ms.find((mm) => mm.method === "manual") || ms[0] || null;
-        setMethod(manual);
-        setRoleId(manual?.default_role?.id ?? null);
+        setMethods(ms);
+        // Prefer an enabled manual method, else any manual, else first.
+        const pref =
+          ms.find((m) => m.method === "manual" && m.status === "enabled") ||
+          ms.find((m) => m.method === "manual") ||
+          ms[0] ||
+          null;
+        setMethodId(pref?.id ?? null);
+        setRoleId(pref?.default_role?.id ?? null);
       })
-      .catch((e) => setError(e.message));
-  }, [open, courseId]);
+      .catch((e) => setError(e.message))
+      .finally(() => setMethodsLoaded(true));
+  }, [open, courseId, presetUserId]);
 
-  // Autofocus the user select whenever the modal opens — it's the first
-  // control and the field every enrolment must start from.
+  // When the method changes, default the role to that method's default role.
   useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(
-      () => fieldsRef.current?.querySelector("select")?.focus(),
-      0,
-    );
-    return () => clearTimeout(t);
-  }, [open]);
+    if (method?.default_role?.id) setRoleId(method.default_role.id);
+  }, [methodId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep the modal usable even if /api/roles isn't served yet.
   const roleOptions = roles.length
     ? roles
     : method?.default_role
       ? [{ id: method.default_role.id, name: method.default_role.short_name }]
       : [];
 
+  const datesValid = !timeStart || !timeEnd || new Date(timeStart) < new Date(timeEnd);
+  const canSubmit = !!userId && !!methodId && datesValid && !busy;
+
   const submit = () => {
+    if (!canSubmit) return;
     setBusy(true);
     setReasons(null);
-    setFailure(null);
     setError(null);
     apiPost(`/api/enrolment/courses/${courseId}/enrol`, {
       user_id: userId,
       role_id: roleId || undefined,
-      method_id: method?.id,
+      method_id: methodId || undefined,
       time_start: timeStart || undefined,
       time_end: timeEnd || undefined,
-      // Omitted unless deliberately chosen — an absent field cannot be read as
-      // "reactivate", which `activate: false` eventually might be.
-      ...(activate ? { activate: true } : {}),
+      activate,
     })
       .then(() => onEnrolled())
       .catch((e) => {
-        if (e instanceof ApiError) {
-          setFailure(e);
-          setReasons(e.reasons);
-        } else setError(e.message);
+        if (e instanceof ApiError) setReasons(e.reasons);
+        else setError(e.message);
       })
       .finally(() => setBusy(false));
   };
 
-  // The server's status decides the heading; the reasons themselves stay
-  // verbatim. 409 is the duplicate/guest conflict, 403 a capability refusal,
-  // 401 no verified identity (Khaled's D-AUTH).
-  const refusalTitle = (status) =>
-    ({
-      401: "Not signed in",
-      403: "Not permitted",
-      409: "Conflict — already enrolled or not allowed here",
-    })[status] ?? "Could not enrol";
-
-  // Enter anywhere in the form submits once a user is chosen (the only
-  // required field); selects and datetime inputs otherwise swallow it.
-  const onFormKeyDown = (e) => {
-    if (e.key === "Enter" && userId && !busy) {
-      e.preventDefault();
-      submit();
-    }
-  };
-
   return (
-    <Modal
+    <Dialog
       open={open}
-      title="Enrol user"
       onClose={onClose}
+      dir={dir}
+      icon="userPlus"
+      title="Enrol users"
+      titleAr="تسجيل مستخدمين"
       footer={
         <>
-          <button className="btn" onClick={onClose}>
-            Cancel
+          <button type="button" className="enr-btn" onClick={onClose}>
+            <T en="Cancel" ar="إلغاء" />
           </button>
           <button
-            className="btn btn--primary"
-            disabled={busy || !userId}
-            onClick={submit}
+            type="submit"
+            form="enrol-user-form"
+            className="enr-btn enr-btn--primary"
+            disabled={!canSubmit}
           >
-            Enrol
+            {busy && <Icon name="loader" size={15} className="enr-spin" />}
+            <T en="Enrol user" ar="تسجيل المستخدم" />
           </button>
         </>
       }
     >
-      <div ref={fieldsRef} onKeyDown={onFormKeyDown}>
+      {/* A real form so Enter submits and the fields are grouped; the footer's
+          submit button binds via its form="enrol-user-form" attribute. */}
+      <form
+        id="enrol-user-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
       {error && <div className="error-banner">{error}</div>}
-      <div className="form-row">
-        <label>User</label>
-        <UserSelect value={userId} onChange={setUserId} />
-      </div>
-      <div className="form-row">
-        <label>Role</label>
-        <select
-          className="select"
-          value={roleId ?? ""}
-          onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : null)}
-        >
-          {roleOptions.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="form-row">
-        <label>Start</label>
-        <input
-          className="input"
-          type="datetime-local"
-          value={timeStart}
-          onChange={(e) => setTimeStart(e.target.value)}
-        />
-      </div>
-      <div className="form-row">
-        <label>End</label>
-        <input
-          className="input"
-          type="datetime-local"
-          value={timeEnd}
-          onChange={(e) => setTimeEnd(e.target.value)}
-        />
-      </div>
-      {/* INSUFFICIENT EVIDENCE — requires staging inspection.
-          Placement is a guess: this sits after the date fields because it
-          qualifies the write, but whether it belongs here, beside the user
-          select (where the operator learns the user is suspended), or only
-          appears once the chosen user IS suspended, is not decidable from the
-          code. The last of those is probably best and needs the participant's
-          effective_status at selection time, which UserSelect does not
-          currently provide. */}
-      <div className="form-row">
-        <label htmlFor="reenrol-activate">Reactivate</label>
-        <span>
-          <input
-            id="reenrol-activate"
-            type="checkbox"
-            checked={activate}
-            onChange={(e) => setActivate(e.target.checked)}
-          />{" "}
-          <span className="muted">
-            If this user is currently suspended, reactivate them. Leave
-            unticked to re-enrol without lifting the suspension.
-          </span>
-        </span>
-      </div>
-      {reasons && (
-        <ReasonList
-          reasons={reasons}
-          tone="error"
-          title={refusalTitle(failure?.status)}
-        />
+
+      {methodsLoaded && methods.length === 0 && (
+        <p className="enr-field__err" role="status">
+          <T
+            en="This course has no enrolment methods — add one in the Methods tab first."
+            ar="لا توجد طرق تسجيل في هذا المقرر — أضف طريقة من تبويب «طرق التسجيل» أولاً."
+          />
+        </p>
       )}
+
+      <div className="enr-field">
+        <label className="enr-field__label">
+          <T en="User" ar="المستخدم" />
+          <span className="enr-req" aria-hidden="true">*</span>
+        </label>
+        <UserCombo
+          users={users}
+          value={userId}
+          onChange={setUserId}
+          required
+          ariaLabel={both("User", "المستخدم")}
+        />
       </div>
-    </Modal>
+
+      <div className="enr-field-grid">
+        <div className="enr-field">
+          <label className="enr-field__label" htmlFor="enr-method">
+            <T en="Enrolment method" ar="طريقة التسجيل" />
+            <span className="enr-req" aria-hidden="true">*</span>
+          </label>
+          <div className="enr-field__wrap">
+            <span className="enr-field__lead" aria-hidden="true">
+              <Icon name="workflow" size={16} />
+            </span>
+            <select
+              id="enr-method"
+              className="enr-select enr-select--lead"
+              value={methodId ?? ""}
+              aria-required="true"
+              onChange={(e) => setMethodId(e.target.value ? Number(e.target.value) : null)}
+            >
+              {methods.map((m) => {
+                const mm = methodMeta(m.method);
+                return (
+                  <option key={m.id} value={m.id}>
+                    {mm.en}
+                    {m.status !== "enabled" ? " — disabled" : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+
+        <div className="enr-field">
+          <label className="enr-field__label" htmlFor="enr-role">
+            <T en="Role" ar="الدور" />
+          </label>
+          <div className="enr-field__wrap">
+            <span className="enr-field__lead" aria-hidden="true">
+              <Icon name="shield" size={16} />
+            </span>
+            <select
+              id="enr-role"
+              className="enr-select enr-select--lead"
+              value={roleId ?? ""}
+              onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : null)}
+            >
+              {roleOptions.length === 0 && <option value="">—</option>}
+              {roleOptions.map((r) => {
+                const rm = roleMeta(r.short_name ?? r.name);
+                return (
+                  <option key={r.id} value={r.id}>
+                    {r.name ?? rm.en}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+
+        <div className="enr-field">
+          <label className="enr-field__label" htmlFor="enr-start">
+            <T en="Start date" ar="تاريخ البدء" />
+          </label>
+          <div className="enr-field__wrap">
+            <span className="enr-field__lead" aria-hidden="true">
+              <Icon name="calendar" size={16} />
+            </span>
+            <input
+              id="enr-start"
+              className="enr-input enr-input--lead"
+              type="datetime-local"
+              value={timeStart}
+              onChange={(e) => setTimeStart(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="enr-field">
+          <label className="enr-field__label" htmlFor="enr-end">
+            <T en="End date" ar="تاريخ الانتهاء" />
+          </label>
+          <div className="enr-field__wrap">
+            <span className="enr-field__lead" aria-hidden="true">
+              <Icon name="calendarClock" size={16} />
+            </span>
+            <input
+              id="enr-end"
+              className="enr-input enr-input--lead"
+              type="datetime-local"
+              value={timeEnd}
+              onChange={(e) => setTimeEnd(e.target.value)}
+            />
+          </div>
+          {!datesValid && (
+            <span className="enr-field__err">
+              <T en="End must be after start." ar="يجب أن يكون الانتهاء بعد البدء." />
+            </span>
+          )}
+        </div>
+      </div>
+
+      <Switch
+        id="enr-activate"
+        checked={activate}
+        onChange={setActivate}
+        label="Activate immediately"
+        ar="تفعيل مباشرة"
+      />
+
+      {reasons && <ReasonList reasons={reasons} tone="error" title={both("Could not enrol", "تعذّر التسجيل")} />}
+      </form>
+    </Dialog>
   );
 }

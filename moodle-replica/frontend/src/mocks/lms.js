@@ -243,310 +243,6 @@ export const routes = [
     },
   },
 
-  // == profile: own account maintenance ===================================
-  {
-    // Change your own name/password. Credentialed (signup/admin-created)
-    // accounts must prove the current password; seed personas have none.
-    method: "PATCH",
-    pattern: /^\/api\/auth\/profile$/,
-    handler: (m, body) => {
-      const user = userById(Number(body.user_id));
-      if (!user) throw new ApiError(404, { detail: "unknown user" });
-      const cred = CREDENTIALS.get(user.id);
-      if (body.new_password) {
-        if (cred && cred.password !== body.current_password)
-          throw new ApiError(403, { reasons: ["current password is wrong — no password change without it"] });
-        CREDENTIALS.set(user.id, { password: body.new_password, confirmed: cred?.confirmed ?? true });
-      }
-      if (body.first_name) user.first_name = body.first_name;
-      if (body.last_name) user.last_name = body.last_name;
-      user.full_name = `${user.first_name} ${user.last_name}`;
-      return user;
-    },
-  },
-  {
-    // Everything marked, in one strip: graded submissions + released quiz totals.
-    method: "GET",
-    pattern: /^\/api\/lms\/my-grades$/,
-    handler: (m, body, query) => {
-      const userId = Number(query.user_id);
-      const rows = [];
-      for (const s of SUBMISSIONS.filter((x) => x.user_id === userId && x.status === "graded")) {
-        const a = activityById(s.activity_id);
-        const c = courseById(a?.course_id);
-        rows.push({ course: c?.short_name, activity: a?.name, kind: "assignment", score: s.grade, max: 100, feedback: s.feedback });
-      }
-      for (const at of QUIZ_ATTEMPTS.filter((x) => x.user_id === userId && x.state === "graded")) {
-        const a = activityById(at.activity_id);
-        const c = courseById(a?.course_id);
-        const quiz = quizForActivity(at.activity_id);
-        rows.push({ course: c?.short_name, activity: a?.name, kind: "quiz", score: at.total, max: quiz ? quiz.questions.reduce((s2, q) => s2 + q.points, 0) : null, feedback: null });
-      }
-      return rows;
-    },
-  },
-
-  // == admin: user + course administration ================================
-  {
-    // Grant/revoke the Manager role at System — the "roles etc" lever.
-    // No self-demotion: the last thing an admin does is lock themselves out.
-    method: "POST",
-    pattern: /^\/api\/lms\/users\/(\d+)\/toggle-manager$/,
-    handler: (m, body) => {
-      const actorId = Number(body.actor_id);
-      if (!isAdmin(actorId))
-        throw new ApiError(403, { reasons: ["only a manager may grant or revoke the manager role"] });
-      const target = userById(Number(m[1]));
-      if (!target) throw new ApiError(404, { detail: "user not found" });
-      const existing = ROLE_ASSIGNMENTS.find(
-        (a) => a.user_id === target.id && a.role_id === 1 && a.context_id === 1,
-      );
-      if (existing) {
-        if (target.id === actorId)
-          throw new ApiError(409, { detail: "you cannot revoke your own manager role — no self-lockout" });
-        ROLE_ASSIGNMENTS.splice(ROLE_ASSIGNMENTS.indexOf(existing), 1);
-        return { manager: false };
-      }
-      ROLE_ASSIGNMENTS.push({ id: nextId(ROLE_ASSIGNMENTS), user_id: target.id, role_id: 1, context_id: 1, component: "", item_id: 0 });
-      return { manager: true };
-    },
-  },
-  {
-    // Admin-created accounts are usable immediately — no confirmation email
-    // (that gate belongs to self-registration only). Moodle-faithful.
-    method: "POST",
-    pattern: /^\/api\/lms\/users$/,
-    handler: (m, body) => {
-      if (!isAdmin(Number(body.actor_id)))
-        throw new ApiError(403, { reasons: ["only a manager may create user accounts"] });
-      const { username, first_name, last_name, password } = body;
-      if (!username || !first_name || !last_name || !password)
-        throw new ApiError(400, { detail: "username, first_name, last_name and password are all required" });
-      if (USERS.some((u) => u.username === username))
-        throw new ApiError(409, { detail: `username '${username}' is taken` });
-      const user = {
-        id: nextId(USERS),
-        username,
-        first_name,
-        last_name,
-        full_name: `${first_name} ${last_name}`,
-        suspended: false,
-      };
-      USERS.push(user);
-      CREDENTIALS.set(user.id, { password, confirmed: true }); // no email gate
-      return user;
-    },
-  },
-  {
-    // Site-wide account suspension: sign-in refused, but enrolments, grades
-    // and completions stay untouched — the roster keeps showing them (C-6).
-    method: "PATCH",
-    pattern: /^\/api\/lms\/users\/(\d+)$/,
-    handler: (m, body) => {
-      const actorId = Number(body.actor_id);
-      if (!isAdmin(actorId))
-        throw new ApiError(403, { reasons: ["only a manager may suspend or reactivate accounts"] });
-      const user = userById(Number(m[1]));
-      if (!user) throw new ApiError(404, { detail: "user not found" });
-      if (user.id === actorId && body.suspended === true)
-        throw new ApiError(409, { detail: "you cannot suspend your own account — that would lock you out" });
-      if (typeof body.suspended === "boolean") user.suspended = body.suspended;
-      return user;
-    },
-  },
-  {
-    // Course visibility: hidden courses vanish from the catalog but nothing
-    // inside them is touched. Editing teachers may hide their own course.
-    method: "PATCH",
-    pattern: /^\/api\/lms\/courses\/(\d+)$/,
-    handler: (m, body) => {
-      const course = courseById(Number(m[1]));
-      if (!course) throw new ApiError(404, { detail: "course not found" });
-      const actorId = Number(body.actor_id);
-      const t = teacherRoleAt(actorId, course.id);
-      if (!isAdmin(actorId) && !t.editing)
-        throw new ApiError(403, { reasons: ["only a manager or this course's editing teacher may change course visibility"] });
-      if (typeof body.visible === "boolean") course.visible = body.visible;
-      return course;
-    },
-  },
-  {
-    // Course soft-delete — hard case 5 made operational: the course is gone
-    // from every list, but progress snapshots and completions survive and
-    // the History tab still answers for it. Managers only.
-    method: "DELETE",
-    pattern: /^\/api\/lms\/courses\/(\d+)$/,
-    handler: (m, body, query) => {
-      if (!isAdmin(Number(query.actor_id)))
-        throw new ApiError(403, { reasons: ["only a manager may delete a course"] });
-      const course = courseById(Number(m[1]));
-      if (!course) throw new ApiError(404, { detail: "course not found" });
-      if (course.deleted) throw new ApiError(409, { detail: "course already deleted" });
-      course.deleted = true;
-      course.visible = false;
-      return {
-        deleted: true,
-        note: "soft-deleted — enrolment paths die with it, but completions and progress snapshots survive (hard case 5); see Progress → History",
-      };
-    },
-  },
-
-  // == teacher: roster management =========================================
-  {
-    // Manual enrolment from the roster — Moodle's Participants "Enrol users".
-    // enrol/manual:enrol belongs to editing teachers; non-editing refused.
-    method: "POST",
-    pattern: /^\/api\/lms\/courses\/(\d+)\/enrol$/,
-    handler: (m, body) => {
-      const course = courseById(Number(m[1]));
-      if (!course) throw new ApiError(404, { detail: "course not found" });
-      const actorId = Number(body.actor_id);
-      const t = teacherRoleAt(actorId, course.id);
-      if (!isAdmin(actorId) && !t.editing)
-        throw new ApiError(403, {
-          reasons: [
-            t.nonEditing
-              ? "non-editing teachers cannot enrol users (enrol/manual:enrol is an editing-teacher capability)"
-              : "you do not teach this course",
-          ],
-        });
-      const user = userById(Number(body.user_id));
-      if (!user) throw new ApiError(404, { detail: "user not found" });
-      if (effectiveStatus(user.id, course.id) === "active")
-        throw new ApiError(409, { detail: `${user.full_name} is already enrolled here` });
-      const manual = METHODS.find(
-        (mm) => mm.course_id === course.id && mm.method === "manual" && mm.status === "enabled",
-      );
-      if (!manual)
-        throw new ApiError(409, { detail: "manual enrolment is disabled in this course — enable it first" });
-      const roleId = Number(body.role_id) || manual.default_role_id;
-      if (![3, 4].includes(roleId) && !isAdmin(actorId))
-        throw new ApiError(403, {
-          reasons: ["a teacher may only enrol with roles below their own (student, non-editing teacher)"],
-        });
-      ENROLMENTS.push({ id: nextId(ENROLMENTS), method_id: manual.id, user_id: user.id, status: "active", time_start: null, time_end: null });
-      const ctx = contextForCourse(course.id);
-      ROLE_ASSIGNMENTS.push({ id: nextId(ROLE_ASSIGNMENTS), user_id: user.id, role_id: roleId, context_id: ctx.id, component: "", item_id: manual.id });
-      return { enrolled: true, user_id: user.id, role: roleById(roleId)?.short_name };
-    },
-  },
-  {
-    // Suspend / reactivate one enrolment path. Suspend blocks access but
-    // KEEPS everything — the reversible lever, unlike unenrol.
-    method: "PATCH",
-    pattern: /^\/api\/lms\/enrolments\/(\d+)$/,
-    handler: (m, body) => {
-      const e = ENROLMENTS.find((x) => x.id === Number(m[1]));
-      if (!e) throw new ApiError(404, { detail: "enrolment not found" });
-      const mm = METHODS.find((x) => x.id === e.method_id);
-      const actorId = Number(body.actor_id);
-      const t = teacherRoleAt(actorId, mm.course_id);
-      if (!isAdmin(actorId) && !t.editing)
-        throw new ApiError(403, { reasons: ["only editing teachers may change enrolment status"] });
-      if (mm.method === "cohort")
-        throw new ApiError(403, {
-          reasons: ["this path is owned by cohort sync — suspending it here would be undone on next sync; remove the cohort membership instead"],
-        });
-      if (!["active", "suspended"].includes(body.status))
-        throw new ApiError(400, { detail: "status must be active or suspended" });
-      e.status = body.status;
-      return { ...e, method: mm.method };
-    },
-  },
-  {
-    // Unenrol one path. Cohort paths refuse (sync recreates them). The
-    // response says out loud what Moodle buries: completions survive.
-    method: "DELETE",
-    pattern: /^\/api\/lms\/enrolments\/(\d+)$/,
-    handler: (m, body, query) => {
-      const e = ENROLMENTS.find((x) => x.id === Number(m[1]));
-      if (!e) throw new ApiError(404, { detail: "enrolment not found" });
-      const mm = METHODS.find((x) => x.id === e.method_id);
-      const actorId = Number(query.actor_id);
-      const t = teacherRoleAt(actorId, mm.course_id);
-      if (!isAdmin(actorId) && !t.editing)
-        throw new ApiError(403, { reasons: ["only editing teachers may unenrol users"] });
-      if (mm.method === "cohort")
-        throw new ApiError(403, {
-          reasons: ["this path is owned by cohort sync — it would be recreated on next sync; remove the cohort membership instead"],
-        });
-      ENROLMENTS.splice(ENROLMENTS.indexOf(e), 1);
-      const ra = ROLE_ASSIGNMENTS.find(
-        (a) => a.user_id === e.user_id && a.item_id === mm.id && a.component !== "enrol_cohort",
-      );
-      if (ra) ROLE_ASSIGNMENTS.splice(ROLE_ASSIGNMENTS.indexOf(ra), 1);
-      return null; // 204
-    },
-  },
-  {
-    // Remove a course role (e.g. demote a non-editing teacher). Machine-owned
-    // assignments refuse, mirroring /api/roles/assignments provenance guard.
-    method: "POST",
-    pattern: /^\/api\/lms\/courses\/(\d+)\/remove-role$/,
-    handler: (m, body) => {
-      const course = courseById(Number(m[1]));
-      const ctx = contextForCourse(course?.id);
-      if (!ctx) throw new ApiError(404, { detail: "course not found" });
-      const actorId = Number(body.actor_id);
-      const t = teacherRoleAt(actorId, course.id);
-      if (!isAdmin(actorId) && !t.editing)
-        throw new ApiError(403, { reasons: ["only editing teachers may remove roles here"] });
-      const ra = ROLE_ASSIGNMENTS.find(
-        (a) => a.user_id === Number(body.user_id) && a.role_id === Number(body.role_id) && a.context_id === ctx.id,
-      );
-      if (!ra) throw new ApiError(404, { detail: "no such role assignment at this course" });
-      if (ra.component.startsWith("enrol_"))
-        throw new ApiError(403, {
-          reasons: [`assignment is owned by '${ra.component}' — remove the enrolment path instead`],
-        });
-      ROLE_ASSIGNMENTS.splice(ROLE_ASSIGNMENTS.indexOf(ra), 1);
-      return null;
-    },
-  },
-  {
-    // Revert a submission to draft — the other half of "submit locks it".
-    method: "POST",
-    pattern: /^\/api\/lms\/submissions\/(\d+)\/revert$/,
-    handler: (m, body) => {
-      const s = SUBMISSIONS.find((x) => x.id === Number(m[1]));
-      if (!s) throw new ApiError(404, { detail: "submission not found" });
-      const activity = activityById(s.activity_id);
-      gradeGate(Number(body.actor_id), activity.course_id, s.user_id);
-      if (s.status === "draft") throw new ApiError(409, { detail: "already a draft" });
-      s.status = "draft";
-      s.submitted_at = null;
-      return s; // grade/feedback kept — reverting is not un-marking
-    },
-  },
-  {
-    // Show/hide an activity — editing teachers only; students' world
-    // changes instantly (hidden = does not exist for them).
-    method: "PATCH",
-    pattern: /^\/api\/lms\/activities\/(\d+)$/,
-    handler: (m, body) => {
-      const activity = activityById(Number(m[1]));
-      if (!activity) throw new ApiError(404, { detail: "activity not found" });
-      const actorId = Number(body.actor_id);
-      const t = teacherRoleAt(actorId, activity.course_id);
-      if (!isAdmin(actorId) && !t.editing)
-        throw new ApiError(403, {
-          reasons: [
-            t.nonEditing
-              ? "non-editing teachers may not alter activities (grade-only role)"
-              : "you do not teach this course",
-          ],
-        });
-      if (typeof body.visible === "boolean") activity.visible = body.visible;
-      if (body.name) activity.name = body.name;
-      if (body.attempts_allowed != null) {
-        const quiz = quizForActivity(activity.id);
-        if (!quiz) throw new ApiError(400, { detail: "attempts_allowed only applies to quizzes" });
-        quiz.attempts_allowed = Math.max(1, Number(body.attempts_allowed));
-      }
-      return activity;
-    },
-  },
-
   // == catalog + enrolment options ========================================
   {
     method: "GET",
@@ -572,6 +268,67 @@ export const routes = [
           },
         };
       });
+    },
+  },
+  {
+    // Teacher/manager enrols a student via the course's manual method. Mirrors
+    // the real lms/enrol.py (enrol_user(..., activate=True)). This path was
+    // previously UNMOCKED, so in mock mode the write fell through to the real
+    // backend while the student's mock catalog never saw it — the enrolled
+    // student showed as "not enrolled" from their own side.
+    method: "POST",
+    pattern: /^\/api\/lms\/courses\/(\d+)\/enrol$/,
+    handler: (m, body) => {
+      const course = courseById(Number(m[1]));
+      const userId = Number(body.user_id);
+      const user = userById(userId);
+      if (!course || !user) throw new ApiError(404, { detail: "unknown course or user" });
+      const method = body.method_id
+        ? METHODS.find((mm) => mm.id === body.method_id)
+        : METHODS.find(
+            (mm) => mm.course_id === course.id && mm.method === "manual" && mm.status === "enabled",
+          );
+      if (!method)
+        throw new ApiError(409, {
+          detail: "manual enrolment is disabled in this course — enable it first",
+        });
+      const roleId = body.role_id || method.default_role_id;
+      const existing = ENROLMENTS.find(
+        (e) => e.method_id === method.id && e.user_id === userId,
+      );
+      if (existing) {
+        existing.status = "active"; // explicit teacher enrol activates (activate=True)
+      } else {
+        ENROLMENTS.push({
+          id: nextId(ENROLMENTS),
+          method_id: method.id,
+          user_id: userId,
+          status: "active",
+          time_start: null,
+          time_end: null,
+        });
+      }
+      const ctx = contextForCourse(course.id);
+      if (
+        ctx &&
+        !ROLE_ASSIGNMENTS.some(
+          (ra) => ra.user_id === userId && ra.context_id === ctx.id && ra.role_id === roleId,
+        )
+      )
+        ROLE_ASSIGNMENTS.push({
+          id: nextId(ROLE_ASSIGNMENTS),
+          user_id: userId,
+          role_id: roleId,
+          context_id: ctx.id,
+          component: "",
+          item_id: method.id,
+        });
+      return {
+        enrolled: true,
+        course_id: course.id,
+        user_id: userId,
+        role: roleById(roleId)?.short_name,
+      };
     },
   },
   {
@@ -605,52 +362,6 @@ export const routes = [
       });
       return { enrolled: true, course_id: course.id, role: roleById(method.default_role_id)?.short_name };
     },
-  },
-  {
-    // Moodle-faithful: only a SELF-enrolled path may be self-removed
-    // (enrol/self:unenrolself). Manual/cohort paths refuse with the reason.
-    // Completions and grades survive — unenrolment never rewrites the past.
-    method: "POST",
-    pattern: /^\/api\/lms\/courses\/(\d+)\/unenrol-self$/,
-    handler: (m, body) => {
-      const course = courseById(Number(m[1]));
-      const userId = Number(body.user_id);
-      if (!course || !userById(userId)) throw new ApiError(404, { detail: "unknown course or user" });
-      const paths = ENROLMENTS.map((e) => ({ e, mm: METHODS.find((x) => x.id === e.method_id) })).filter(
-        ({ e, mm }) => e.user_id === userId && mm && mm.course_id === course.id,
-      );
-      if (!paths.length) throw new ApiError(409, { detail: "you are not enrolled in this course" });
-      const selfPaths = paths.filter(({ mm }) => mm.method === "self");
-      if (!selfPaths.length)
-        throw new ApiError(403, {
-          reasons: [
-            `your enrolment here was created by ${paths.map(({ mm }) => mm.method).join(" + ")} — only self-enrolled students may unenrol themselves (enrol/self:unenrolself); ask your teacher`,
-          ],
-        });
-      for (const { e, mm } of selfPaths) {
-        ENROLMENTS.splice(ENROLMENTS.indexOf(e), 1);
-        const ra = ROLE_ASSIGNMENTS.find(
-          (a) => a.user_id === userId && a.component === "enrol_self" && a.item_id === mm.id,
-        );
-        if (ra) ROLE_ASSIGNMENTS.splice(ROLE_ASSIGNMENTS.indexOf(ra), 1);
-      }
-      const still = paths.length > selfPaths.length;
-      return {
-        unenrolled: !still,
-        note: still
-          ? "self-enrolment path removed — other enrolment paths keep you in this course (any-active wins)"
-          : "unenrolled — your completions and grades are kept; re-enrol any time and they return",
-      };
-    },
-  },
-  {
-    method: "GET",
-    pattern: /^\/api\/lms\/my-requests$/,
-    handler: (m, body, query) =>
-      ENROL_REQUESTS.filter((r) => r.user_id === Number(query.user_id)).map((r) => ({
-        ...r,
-        course: courseById(r.course_id),
-      })),
   },
   {
     method: "POST",
@@ -734,17 +445,7 @@ export const routes = [
       const asTeacher = teaches(userId, courseId);
       return ACTIVITIES.filter((a) => a.course_id === courseId)
         .filter((a) => asTeacher || a.visible) // hidden activities vanish for students, exactly like Moodle
-        .map((a) => ({
-          ...a,
-          mine: myActivityStatus(a, userId),
-          // teachers see their marking queue at a glance
-          queue: asTeacher
-            ? {
-                pending_submissions: SUBMISSIONS.filter((s) => s.activity_id === a.id && s.status === "submitted").length,
-                pending_essays: QUIZ_ATTEMPTS.filter((x) => x.activity_id === a.id && x.state === "finished").length,
-              }
-            : undefined,
-        }));
+        .map((a) => ({ ...a, mine: myActivityStatus(a, userId) }));
     },
   },
 

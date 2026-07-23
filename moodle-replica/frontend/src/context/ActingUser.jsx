@@ -28,14 +28,9 @@ export function ActingUserProvider({ children }) {
   }, []);
 
   // Signup (mock) creates a user the initial /api/users fetch didn't know —
-  // register it so login can act as it immediately. Upserts, so profile
-  // edits refresh the cached row too.
+  // register it so login can act as it immediately.
   const addUser = (u) =>
-    setUsers((cur) =>
-      cur.some((x) => x.id === u.id)
-        ? cur.map((x) => (x.id === u.id ? { ...x, ...u } : x))
-        : [...cur, u],
-    );
+    setUsers((cur) => (cur.some((x) => x.id === u.id) ? cur : [...cur, u]));
 
   const actingUser = users.find((u) => u.id === actingUserId) || null;
   setApiActingUser(actingUser?.id ?? null); // keep the API principal header in sync

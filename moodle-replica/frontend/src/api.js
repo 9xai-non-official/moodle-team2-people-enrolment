@@ -11,16 +11,51 @@ const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "1";
 // Principal header (interim identity assertion — see backend app/deps.py).
 // ActingUser context keeps this in sync; the server validates the account
 // and makes every capability decision itself.
+//
+// Two identity mechanisms coexist in this backend (both derive AUTHORITY
+// server-side from the id — never from the client):
+//   • X-Acting-User header  — app/deps.current_user (enrolment/groups/… routes)
+//   • Authorization: Bearer — app/services/auth.get_current_user (the roles &
+//     permissions mutations + /check + /assignable, which are actor-relative).
+// The SPA has no login/IdP, so we mint the Bearer via the backend's DEV-ONLY
+// /permissions/dev-login (gated by AUTH_DEV_LOGIN + AUTH_SECRET). It is
+// best-effort: if dev-login is unavailable (mock mode, or a deploy with the
+// gate off) we simply send no token and the Bearer-gated routes answer 401
+// honestly. The token's `sub` IS the acting user — so "Acting as X" is a true
+// statement about backend identity, not a UI fiction.
 let actingUserId = null;
+let bearerToken = null; // token for `actingUserId`, or null
+let tokenForId = null; // which id `bearerToken` belongs to
+let tokenPromise = null; // in-flight dev-login, so we mint at most once per id
+
 export function setApiActingUser(id) {
+  if (id === actingUserId) return;
   actingUserId = id;
+  // Invalidate any token from the previous identity and pre-warm the new one.
+  bearerToken = null;
+  tokenForId = null;
+  tokenPromise = null;
+  if (id != null && !USE_MOCKS) ensureToken(id);
 }
 
-// Bearer token from a real sign-in — hardened routers (roles/permissions)
-// authenticate with this; X-Acting-User stays for the interim ones.
-let authToken = null;
-export function setApiAuthToken(token) {
-  authToken = token || null;
+// Mint (and cache) a Bearer token for `id` via the dev-login stand-in. Never
+// throws — a failure just means no token is attached (routes 401 honestly).
+async function ensureToken(id) {
+  if (bearerToken && tokenForId === id) return bearerToken;
+  if (tokenPromise && tokenForId === id) return tokenPromise;
+  tokenForId = id;
+  tokenPromise = fetch(`${BASE_URL}/api/permissions/dev-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: id }),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (data?.token && tokenForId === id) bearerToken = data.token;
+      return bearerToken;
+    })
+    .catch(() => null);
+  return tokenPromise;
 }
 
 // Global activity + write signals: the shell renders a thin top progress bar
@@ -40,7 +75,7 @@ async function request(method, path, body) {
   if (USE_MOCKS) {
     signalActivity(+1);
     try {
-      const hit = await mockRequest(method, path, body);
+      const hit = await mockRequest(method, path, body, { actingUserId });
       if (hit) {
         if (method !== "GET") signalWrite(method, path);
         return hit.data; // mock 403/409s throw ApiError from the handler
@@ -50,21 +85,25 @@ async function request(method, path, body) {
     }
   }
 
+  // Bearer-gated routes need a token for the acting identity; mint-and-cache
+  // it first (no-op after the first call, and for open routes the header is
+  // simply ignored). Best-effort: a null token just isn't attached.
+  const token =
+    actingUserId != null ? await ensureToken(actingUserId).catch(() => null) : null;
+
   signalActivity(+1);
   try {
     const headers = {};
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (actingUserId != null) headers["X-Acting-User"] = String(actingUserId);
-    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
-      // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields;
-      // the global DB handler: {ok, code, reason, detail, constraint}.
-      // ApiError normalises all three — see errors.js.
+      // FastAPI: {"detail": ...}; domain endpoints: reason/reasons fields.
       let payload = null;
       try {
         payload = await res.json();
@@ -83,6 +122,7 @@ async function request(method, path, body) {
 
 export const apiGet = (path) => request("GET", path);
 export const apiPost = (path, body) => request("POST", path, body ?? {});
+export const apiPut = (path, body) => request("PUT", path, body ?? {});
 export const apiPatch = (path, body) => request("PATCH", path, body ?? {});
 export const apiDelete = (path) => request("DELETE", path);
 

@@ -46,8 +46,4 @@ export const GLOSSARY = {
     "A teacher can't create courses — they ask, a manager approves, and the requester becomes the new course's teacher.",
   "manual marking":
     "Essay answers wait for a human: the quiz total stays hidden until a teacher scores them.",
-  manager:
-    "The site-wide power role, held at the System context — grants everything everywhere, including creating courses and users.",
-  "account suspension":
-    "The site-wide off-switch: sign-in refused, but every enrolment, grade and completion stays exactly where it was.",
 };

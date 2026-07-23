@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../api";
 import { ApiError } from "../../errors";
+import { fetchCourseGroupOptions } from "../../lib/groupsApi";
 import { useActingUser } from "../../context/ActingUser";
 import Badge from "../common/Badge";
 import DataTable from "../common/DataTable";
@@ -57,9 +58,11 @@ export default function CompletionGrid({ courseId }) {
   }, [courseId, groupId, actorId, reloadKey]);
 
   // Group options come from the Groups domain — cross-domain GET is fine (§4.5).
+  // Via the groupsApi seam so it resolves in both mock mode and against the live
+  // backend (GET /api/groups?course_id=), not just the mock course-scoped path.
   useEffect(() => {
-    apiGet(`/api/groups/courses/${courseId}/groups`)
-      .then((list) => setGroups(Array.isArray(list) ? list : []))
+    fetchCourseGroupOptions(courseId)
+      .then(setGroups)
       .catch(() => setGroups([]));
   }, [courseId]);
 
@@ -125,9 +128,9 @@ export default function CompletionGrid({ courseId }) {
           <div>
             <Glyph cell={cell} />
             {cell.viewed && <span className="muted"> seen</span>}
-            <div className="cell-actions">
+            <div>
               <button
-                className="btn btn--sm"
+                className="btn"
                 disabled={viewAs || !canOverride}
                 title={!canOverride ? report.cannot_override_reason : undefined}
                 onClick={() => {
@@ -139,7 +142,7 @@ export default function CompletionGrid({ courseId }) {
                 Override
               </button>
               {own && !viewAs && (
-                <button className="btn btn--sm" onClick={() => manualTick(a.id)}>
+                <button className="btn" onClick={() => manualTick(a.id)}>
                   Tick
                 </button>
               )}
