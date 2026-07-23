@@ -144,9 +144,10 @@ async def create_course(body: dict = Body(default=None),
     refused (403) and should request a course instead (requests.py: approval
     makes them its teacher).
 
-    Writes ONLY the course row. The course-level *context* (permission spine)
-    and default *enrolment methods* belong to other domains and are not written
-    here; when the context is still absent the response says so."""
+    Writes the course row together with its course-level *context* (permission
+    spine, so roles can be assigned here) and a default enabled *manual*
+    enrolment method, atomically — same wiring the course-request approval path
+    produces, so a directly-created course is immediately teachable/enrollable."""
     body = body or {}
     # course:create lives at category/site level (there is only a system context
     # here), so check it there. has_capability applies the site-admin bypass and
@@ -173,26 +174,38 @@ async def create_course(body: dict = Body(default=None),
     if clash:
         raise HTTPException(status_code=409,
                             detail=f"short name '{short_name}' already exists")
-    row = await db.fetch_one(
-        f"insert into course (short_name, full_name, visible) "
-        f"values ($1, $2, true) returning {_COURSE_COLS}",
-        short_name, full_name,
-    )
+    # Create the course together with its permission spine, atomically:
+    #   * the course-level *context* — without it a role assignment has no course
+    #     context to attach to, so an assigned teacher never registers and the
+    #     course reads as "unavailable" in the catalog (teaching == false); and
+    #   * a default enabled *manual* enrolment method, so the course can take
+    #     enrolments / request-to-enrol.
+    # This mirrors the course-request approval path (requests.decide_course_
+    # request) so both routes yield an identically wired course.
+    async with db.transaction() as conn:
+        row = await conn.fetchrow(
+            f"insert into course (short_name, full_name, visible) "
+            f"values ($1, $2, true) returning {_COURSE_COLS}",
+            short_name, full_name,
+        )
+        sys_ctx = await conn.fetchval(
+            "select id from context where level = 'system' limit 1")
+        await conn.execute(
+            "insert into context (level, instance_id, parent_id) "
+            "values ('course', $1, $2)",
+            row["id"], sys_ctx,
+        )
+        student_role = await conn.fetchval(
+            "select id from role where short_name = 'student'")
+        await conn.execute(
+            "insert into enrolment_method (course_id, method, status, "
+            "default_role_id) values ($1, 'manual', 'enabled', $2)",
+            row["id"], student_role,
+        )
+    row = dict(row)
     await _audit_safe("course.created", actor_id=principal["id"],
                       course_id=row["id"],
                       detail={"short_name": short_name, "full_name": full_name})
-    # The course-level context is not ours to create (Khaled's permission
-    # spine). Surface its absence so the orchestrator/permissions layer seeds
-    # it — enrolment role rows and per-course capability checks need it.
-    ctx = await db.fetch_one(
-        "select id from context where level = 'course' and instance_id = $1",
-        row["id"],
-    )
-    if ctx is None:
-        row["note"] = (
-            "course created; its course-level context is not yet present — "
-            "roles/enrolment at this course need it seeded (permissions domain)"
-        )
     return row
 
 
