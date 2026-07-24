@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import db, errors
 from app.routers import users, courses, enrolment, roles, groups, progress
-from app.routers import permissions, auth, progress_report
+from app.routers import permissions, auth, progress_report, sis_events
 from app.routers.lms import router as lms_router
 
 
@@ -102,3 +102,4 @@ app.include_router(progress_report.router)
 app.include_router(permissions.router)
 app.include_router(auth.router)
 app.include_router(lms_router)
+app.include_router(sis_events.router)  # SIS portal ingest (Mahmoud, T2-SIS-001)

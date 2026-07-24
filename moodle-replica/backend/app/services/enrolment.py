@@ -418,15 +418,23 @@ async def unenrol_user(db, method_id: int, user_id: int, *,
         course_id = method["course_id"]
         component = _component(method["method"])
 
-        if method["method"] == "cohort" and not _cohort_sync:
+        if method["method"] in ("cohort", "sis") and not _cohort_sync:
+            # ENR-013 extended to 'sis' (SIS-WHOCAN-SYNC-CONTRACT §6): for both
+            # kinds an external list is the source of truth, so a manual unenrol
+            # of an ACTIVE path would just be reverted by the next sync.
             current = await _one(conn,
                 "select status from enrolment "
                 "where method_id = $1 and user_id = $2", method_id, user_id)
             if current is not None and current["status"] == "active":
-                return {"ok": False, "http_status": 409,
-                        "reason": "an active cohort enrolment cannot be "
-                                  "manually unenrolled — suspend it first, or "
-                                  "remove the user from the cohort (ENR-013)"}
+                reason = (
+                    "an active cohort enrolment cannot be manually unenrolled "
+                    "— suspend it first, or remove the user from the cohort "
+                    "(ENR-013)"
+                    if method["method"] == "cohort" else
+                    "an active SIS enrolment cannot be manually unenrolled — "
+                    "it is managed by the student portal; drop the registration "
+                    "there instead (ENR-013/sis)")
+                return {"ok": False, "http_status": 409, "reason": reason}
 
         deleted = await _all(conn, """
             delete from enrolment where method_id = $1 and user_id = $2

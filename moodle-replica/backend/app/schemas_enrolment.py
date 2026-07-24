@@ -11,14 +11,20 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 EnrolmentStatus = Literal["active", "suspended"]
-MethodKind = Literal["manual", "self", "cohort", "guest"]
+# MethodKind covers everything a RESPONSE may carry, including 'sis' (the
+# student-portal door, T2-SIS-001). CreatableMethodKind is the REQUEST subset:
+# sis methods are created only by the SIS ingest (services/sis_ingest.py),
+# never by hand through the generic method API — a hand-made sis door would
+# masquerade as portal-managed without any portal behind it.
+MethodKind = Literal["manual", "self", "cohort", "guest", "sis"]
+CreatableMethodKind = Literal["manual", "self", "cohort", "guest"]
 MethodStatus = Literal["enabled", "disabled"]
 
 
 # ---- requests -------------------------------------------------------------
 
 class MethodCreate(BaseModel):
-    method: MethodKind
+    method: CreatableMethodKind
     status: MethodStatus = "enabled"
     default_role_id: int | None = None
     cohort_id: int | None = None          # required when method='cohort'
