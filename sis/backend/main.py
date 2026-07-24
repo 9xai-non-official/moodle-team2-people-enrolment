@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
@@ -110,3 +111,8 @@ app.include_router(terms.router)
 app.include_router(people.router)
 app.include_router(courses.router)
 app.include_router(registrations.router)
+
+# Serve the student portal (sis/frontend/) at /portal when present.
+_frontend = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
+if os.path.isdir(_frontend):
+    app.mount("/portal", StaticFiles(directory=_frontend, html=True), name="portal")
