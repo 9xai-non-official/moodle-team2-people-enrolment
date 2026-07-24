@@ -63,6 +63,8 @@ def health():
         "status": "ok",
         "service": "9xai-sis",
         "sync_mode": os.getenv("WHOCAN_SYNC_MODE", "dry"),
+        # Per-target delivery modes — the portal's Sync view renders these.
+        "modes": {name: t["mode"]() for name, t in outbox.TARGETS.items()},
         "outbox": outbox.counts(),
         "counts": {
             "terms": len(db.query("select 1 from term")),
