@@ -32,18 +32,30 @@ create table if not exists term (
 );
 
 create table if not exists person (
-  sis_id     text primary key,
-  first      text not null,
-  last       text not null,
-  email      text not null,
-  kind       text not null default 'student',   -- student | teacher | staff
-  created_at text default (datetime('now'))
+  sis_id      text primary key,
+  first       text not null,
+  last        text not null,
+  email       text not null,
+  kind        text not null default 'student',  -- student | teacher | staff
+  national_id text,
+  gender      text,
+  nationality text,
+  birth_date  text,
+  city        text,
+  phone       text,
+  hs_avg      real,                             -- high-school average (معدل الثانوية)
+  created_at  text default (datetime('now'))
 );
 
 create table if not exists course (
   sis_id     text primary key,
   code       text not null,
   title      text not null,
+  credits    integer not null default 3,
+  days       text,                              -- e.g. 'ح ث خ' or 'ن ر'
+  time_slot  text,                              -- e.g. '10:00 - 11:30'
+  room       text,
+  capacity   integer not null default 30,
   created_at text default (datetime('now'))
 );
 
@@ -97,10 +109,29 @@ def connect():
     return conn
 
 
+def _ensure_column(conn, table: str, col: str, ddl: str):
+    """Idempotent column add — lets an existing sis.db pick up new fields
+    without a migration framework (POC-grade schema evolution)."""
+    have = {r[1] for r in conn.execute(f"pragma table_info({table})")}
+    if col not in have:
+        conn.execute(f"alter table {table} add column {ddl}")
+
+
 def init_db():
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        # evolve pre-existing databases created before these fields existed
+        for col, ddl in [("national_id", "national_id text"), ("gender", "gender text"),
+                         ("nationality", "nationality text"), ("birth_date", "birth_date text"),
+                         ("city", "city text"), ("phone", "phone text"),
+                         ("hs_avg", "hs_avg real")]:
+            _ensure_column(conn, "person", col, ddl)
+        for col, ddl in [("credits", "credits integer not null default 3"),
+                         ("days", "days text"), ("time_slot", "time_slot text"),
+                         ("room", "room text"),
+                         ("capacity", "capacity integer not null default 30")]:
+            _ensure_column(conn, "course", col, ddl)
         conn.commit()
     finally:
         conn.close()

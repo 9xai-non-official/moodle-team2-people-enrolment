@@ -77,9 +77,12 @@ def health():
 
 @app.post("/api/seed", tags=["health"])
 def seed():
-    """Demo data: a live term, a teacher, two students, one course.
-    Term starts 2026-07-01 so enrolment windows are LIVE during the demo
-    (a September start would leave every path enrolled-but-not-yet-live)."""
+    """Demo data: a live term, people with full profiles, and a real course
+    catalog (days/time/room/credits/capacity — what المواد المطروحة shows).
+    Term starts 2026-07-01 so enrolment windows are LIVE during the demo.
+
+    Master data only — teaching assignments and registrations go through the
+    API so they flow through the outbox like real life."""
     db.execute(
         """insert into term(code, name, starts_at, ends_at, is_current)
            values('FALL2026','Fall 2026','2026-07-01','2026-12-20',1)
@@ -90,23 +93,50 @@ def seed():
     # Emails MUST equal the Entra UPNs (graph.resolve_user matches UPN→mail),
     # so the tenant's onmicrosoft.com domain is used, not a vanity domain.
     roster = [
-        ("S1001", "Sara", "Ali", "sara@9xai.onmicrosoft.com", "student"),
-        ("S1002", "Omar", "Nasser", "omar@9xai.onmicrosoft.com", "student"),
-        ("T2001", "Tala", "Teacher", "tala@9xai.onmicrosoft.com", "teacher"),
+        ("S1001", "Sara", "Ali", "sara@9xai.onmicrosoft.com", "student",
+         "2001428379", "أنثى", "الأردنية", "2007-05-04", "عمان", "0785454080", 88.4),
+        ("S1002", "Omar", "Nasser", "omar@9xai.onmicrosoft.com", "student",
+         "2001551200", "ذكر", "الأردنية", "2006-11-19", "الزرقاء", "0791234567", 79.2),
+        ("S1003", "Lina", "Haddad", "lina@9xai.onmicrosoft.com", "student",
+         "2001662311", "أنثى", "الأردنية", "2007-02-27", "إربد", "0779988776", 91.5),
+        ("T2001", "Tala", "Teacher", "tala@9xai.onmicrosoft.com", "teacher",
+         "9841022137", "أنثى", "الأردنية", "1988-09-12", "عمان", "0788112233", None),
+        ("T2002", "Bilal", "Diab", "bilal@9xai.onmicrosoft.com", "teacher",
+         "9790455610", "ذكر", "الأردنية", "1979-03-30", "عمان", "0795556677", None),
     ]
-    for sid, f, l, e, k in roster:
+    for sid, f, l, e, k, nid, g, nat, bd, city, ph, avg in roster:
         db.execute(
-            """insert into person(sis_id, first, last, email, kind) values(?,?,?,?,?)
+            """insert into person(sis_id, first, last, email, kind, national_id,
+                                  gender, nationality, birth_date, city, phone, hs_avg)
+               values(?,?,?,?,?,?,?,?,?,?,?,?)
                on conflict(sis_id) do update set
-                 first=excluded.first, last=excluded.last, email=excluded.email, kind=excluded.kind""",
-            (sid, f, l, e, k),
+                 first=excluded.first, last=excluded.last, email=excluded.email,
+                 kind=excluded.kind, national_id=excluded.national_id,
+                 gender=excluded.gender, nationality=excluded.nationality,
+                 birth_date=excluded.birth_date, city=excluded.city,
+                 phone=excluded.phone, hs_avg=excluded.hs_avg""",
+            (sid, f, l, e, k, nid, g, nat, bd, city, ph, avg),
         )
-    db.execute(
-        """insert into course(sis_id, code, title)
-           values('CRS-CS101','CS101','Intro to Computer Science')
-           on conflict(sis_id) do update set code=excluded.code, title=excluded.title"""
-    )
-    return {"seeded": True, "term": "FALL2026", "people": len(roster), "course": "CS101"}
+    catalog = [
+        ("CRS-CS101", "CS101", "Intro to Computer Science", 3, "ح ث خ", "10:00 - 11:30", "405ل", 30),
+        ("CRS-MATH200", "MATH200", "Discrete Mathematics", 3, "ن ر", "09:00 - 10:30", "119ت", 25),
+        ("CRS-ENG101", "ENG101", "English Communication Skills", 3, "ح ث خ", "13:00 - 14:30", "منصة", 40),
+        ("CRS-PHYS101", "PHYS101", "General Physics 1", 3, "ن ر", "11:00 - 12:30", "306هـ", 25),
+        ("CRS-ETH110", "ETH110", "Ethics in Medical Sciences", 2, "ن ر", "12:00 - 13:00", "117ت", 35),
+        ("CRS-LAB090", "LAB090", "Closed-Section Demo Lab", 1, "ن", "08:00 - 09:00", "420ت", 1),
+    ]
+    for sid, code, title, cr, days, ts, room, cap in catalog:
+        db.execute(
+            """insert into course(sis_id, code, title, credits, days, time_slot, room, capacity)
+               values(?,?,?,?,?,?,?,?)
+               on conflict(sis_id) do update set
+                 code=excluded.code, title=excluded.title, credits=excluded.credits,
+                 days=excluded.days, time_slot=excluded.time_slot,
+                 room=excluded.room, capacity=excluded.capacity""",
+            (sid, code, title, cr, days, ts, room, cap),
+        )
+    return {"seeded": True, "term": "FALL2026",
+            "people": len(roster), "courses": len(catalog)}
 
 
 app.include_router(terms.router)

@@ -37,8 +37,66 @@ def test_health_and_seed(client):
     _seed(client)
     h = client.get("/api/health").json()
     assert h["status"] == "ok"
-    assert h["counts"] == {"terms": 1, "people": 3, "courses": 1,
+    assert h["counts"] == {"terms": 1, "people": 5, "courses": 6,
                            "registrations": 0}
+
+
+def test_login_resolves_roles(client):
+    _seed(client)
+    assert client.post("/api/login", json={"sis_id": "S1001"}).json()["role"] == "student"
+    assert client.post("/api/login", json={"sis_id": "T2001"}).json()["role"] == "teacher"
+    admin = client.post("/api/login", json={"sis_id": "admin"}).json()
+    assert admin["role"] == "admin" and admin["name"] == "Registrar"
+    assert client.post("/api/login", json={"sis_id": "NOPE"}).status_code == 404
+
+
+def test_offerings_catalog_shape(client):
+    _seed(client)
+    client.post("/api/assign", json={
+        "person_sis_id": "T2001", "course_sis_id": "CRS-CS101"})
+    client.post("/api/register", json={
+        "person_sis_id": "S1001", "course_sis_id": "CRS-CS101"})
+    offs = {o["sis_id"]: o for o in
+            client.get("/api/offerings", params={"person": "S1001"}).json()}
+    cs = offs["CRS-CS101"]
+    assert cs["instructor"] == "Tala Teacher"
+    assert cs["seats"] == 1 and cs["closed"] is False
+    assert cs["my_status"] == "active"
+    assert offs["CRS-MATH200"]["my_status"] is None
+    # teachers never consume seats
+    assert offs["CRS-CS101"]["seats"] == 1
+
+
+def test_capacity_reg_full(client):
+    _seed(client)   # LAB090 has capacity 1
+    ok = client.post("/api/register", json={
+        "person_sis_id": "S1002", "course_sis_id": "CRS-LAB090"})
+    assert ok.status_code == 200
+    full = client.post("/api/register", json={
+        "person_sis_id": "S1003", "course_sis_id": "CRS-LAB090"})
+    assert full.status_code == 409 and "REG-FULL" in full.json()["detail"]
+    # the seat-holder replaying their own registration is NOT a new seat
+    again = client.post("/api/register", json={
+        "person_sis_id": "S1002", "course_sis_id": "CRS-LAB090"})
+    assert again.status_code == 200
+    # closed flag shows in the catalog
+    offs = {o["sis_id"]: o for o in client.get("/api/offerings").json()}
+    assert offs["CRS-LAB090"]["closed"] is True
+
+
+def test_schedule_for_student_and_teacher(client):
+    _seed(client)
+    client.post("/api/assign", json={
+        "person_sis_id": "T2001", "course_sis_id": "CRS-CS101"})
+    client.post("/api/register", json={
+        "person_sis_id": "S1001", "course_sis_id": "CRS-CS101"})
+    st = client.get("/api/schedule/S1001").json()
+    assert st["term"] == "FALL2026" and st["total_credits"] == 3
+    assert st["rows"][0]["instructor"] == "Tala Teacher"
+    assert st["rows"][0]["days"] == "ح ث خ"
+    te = client.get("/api/schedule/T2001").json()
+    assert te["rows"][0]["role"] == "teacher"
+    assert te["rows"][0]["enrolled"] == 1
 
 
 def test_register_creates_registration_and_outbox_event(client):
@@ -138,7 +196,7 @@ def test_provision_fanout_when_enabled(client, monkeypatch):
         ev = _json.loads(row["event"])
         by_target.setdefault(row["target"], []).append(ev["type"])
     assert sorted(by_target["provision"]) == ["enrol"]          # no account events
-    assert sorted(by_target["whocan"]) == ["account", "account", "account", "enrol"]
+    assert sorted(by_target["whocan"]) == ["account"] * 5 + ["enrol"]
 
 
 def test_provision_off_by_default_no_fanout(client):
@@ -173,15 +231,17 @@ def test_reconcile_replays_desired_state_with_account_gate(client):
     client.post("/api/outbox/drain")                # clear the event-driven rows
 
     rec = client.post("/api/reconcile").json()
-    assert rec["queued"] == {"enrol": 2, "drop": 1, "account": 3}
+    assert rec["queued"] == {"enrol": 2, "drop": 1, "account": 5}
 
-    # account events: Sara + Tala active, Omar (dropped everything) inactive
+    # account gate: registered people active; Omar (dropped everything),
+    # Lina and Bilal (never registered) inactive
     import json as _json
     rows = client.get("/api/outbox", params={"status": "pending"}).json()["rows"]
     acct = {e["person"]["sis_id"]: e["active"]
             for e in (_json.loads(r["event"]) for r in rows)
             if e["type"] == "account"}
-    assert acct == {"S1001": True, "T2001": True, "S1002": False}
+    assert acct == {"S1001": True, "T2001": True, "S1002": False,
+                    "S1003": False, "T2002": False}
 
 
 def test_make_current_switches_terms(client):

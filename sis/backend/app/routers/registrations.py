@@ -46,6 +46,27 @@ def _apply(reg: RegisterIn, kind: str):
         raise HTTPException(404, f"unknown course {reg.course_sis_id}")
     person, course = person[0], course[0]
 
+    # REG-FULL: a student may not register into a full section (مغلقة).
+    # Their own already-active row is exempt (re-register is an idempotent
+    # no-op, never a new seat). Teachers don't consume seats.
+    if kind == "enrol" and reg.role == "student":
+        already = db.query(
+            """select 1 from registration where person_sis_id=? and
+               course_sis_id=? and term_code=? and status='active' limit 1""",
+            (reg.person_sis_id, reg.course_sis_id, term["code"]))
+        if not already:
+            seats = db.query(
+                """select count(*) as n from registration
+                   where course_sis_id=? and term_code=? and role='student'
+                     and status='active'""",
+                (reg.course_sis_id, term["code"]))[0]["n"]
+            cap = db.query("select capacity from course where sis_id=?",
+                           (reg.course_sis_id,))[0]["capacity"]
+            if seats >= cap:
+                raise HTTPException(
+                    409, f"course {course['code']} is full "
+                         f"({seats}/{cap}) — section closed (REG-FULL)")
+
     status = "active" if kind == "enrol" else "dropped"
     db.execute(
         """insert into registration(person_sis_id, course_sis_id, term_code, role, status)
@@ -93,6 +114,33 @@ def assign(reg: RegisterIn):
 def drop(reg: RegisterIn):
     """Drop a registration → removal event queued."""
     return _apply(reg, "drop")
+
+
+@router.get("/schedule/{sis_id}")
+def schedule(sis_id: str):
+    """الجدول الدراسي for one person, current term. Students see their
+    courses with the instructor; teachers see the sections they teach with
+    live enrolment counts. One endpoint, both shapes."""
+    cur = _current_term()
+    if not cur:
+        return {"term": None, "rows": [], "total_credits": 0}
+    rows = db.query(
+        """select r.role, r.status, c.sis_id as course_sis_id, c.code, c.title,
+                  c.credits, c.days, c.time_slot, c.room, c.capacity,
+              (select count(*) from registration x
+                where x.course_sis_id=c.sis_id and x.term_code=r.term_code
+                  and x.role='student' and x.status='active') as enrolled,
+              (select p.first || ' ' || p.last
+                 from registration t join person p on p.sis_id=t.person_sis_id
+                where t.course_sis_id=c.sis_id and t.term_code=r.term_code
+                  and t.role='teacher' and t.status='active'
+                order by t.updated_at limit 1) as instructor
+           from registration r join course c on c.sis_id=r.course_sis_id
+          where r.person_sis_id=? and r.term_code=? and r.status='active'
+          order by c.code""",
+        (sis_id, cur["code"]))
+    return {"term": cur["code"], "rows": rows,
+            "total_credits": sum(r["credits"] for r in rows)}
 
 
 @router.get("/registrations")
