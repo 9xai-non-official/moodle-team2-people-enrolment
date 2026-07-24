@@ -262,6 +262,9 @@ const METHOD_META = {
   self: { icon: "userPlus", en: "Self enrol", ar: "تسجيل ذاتي" },
   cohort: { icon: "usersRound", en: "Cohort sync", ar: "مزامنة الفوج" },
   guest: { icon: "eye", en: "Guest", ar: "ضيف" },
+  // T2-SIS-001: enrolments synced from the student portal (SIS). Like cohort,
+  // the external system is the source of truth — see the unenrol lock below.
+  sis: { icon: "database", en: "SIS · Portal", ar: "نظام التسجيل" },
 };
 const humanize = (v) =>
   String(v ?? "")

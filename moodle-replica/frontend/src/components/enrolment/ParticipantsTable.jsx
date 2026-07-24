@@ -254,24 +254,31 @@ export default function ParticipantsTable({ courseId, courseName, onNavigate, la
           disabled: busy,
           onSelect: () => setStatusOf(p, "active", r.user_id),
         });
-      // R-COHORT (ENR-013): an active cohort-synced path can't be unenrolled
-      // directly — the server refuses it (409). Offer it disabled with the
-      // reason instead of a button that only fails, matching the paths panel.
-      const cohortLocked = p.method === "cohort" && p.status === "active";
+      // R-COHORT (ENR-013): an active externally-synced path (cohort, or the
+      // SIS student portal — T2-SIS-001) can't be unenrolled directly — the
+      // server refuses it (409). Offer it disabled with the reason instead of
+      // a button that only fails, matching the paths panel.
+      const syncLocked =
+        (p.method === "cohort" || p.method === "sis") && p.status === "active";
       items.push({
         kind: "item",
         icon: "userMinus",
         label: "Unenrol",
         ar: "إلغاء التسجيل",
         danger: true,
-        disabled: busy || cohortLocked,
-        title: cohortLocked
-          ? both(
-              "Synced from a cohort — suspend it first, or remove the user from the cohort.",
-              "مُزامَن من فوج — أوقفه أولاً أو أزل المستخدم من الفوج.",
-            )
+        disabled: busy || syncLocked,
+        title: syncLocked
+          ? p.method === "cohort"
+            ? both(
+                "Synced from a cohort — suspend it first, or remove the user from the cohort.",
+                "مُزامَن من فوج — أوقفه أولاً أو أزل المستخدم من الفوج.",
+              )
+            : both(
+                "Managed by the SIS student portal — drop the registration there instead.",
+                "يُدار عبر بوابة التسجيل — احذف التسجيل من البوابة بدلاً من هنا.",
+              )
           : undefined,
-        onSelect: cohortLocked
+        onSelect: syncLocked
           ? undefined
           : () => setConfirmUnenrol({ row: r, path: p }),
       });
@@ -703,6 +710,14 @@ function UnenrolBody({ data, courseName }) {
           <T
             en="This path is synced from a cohort — it can't be unenrolled directly (R-COHORT). Suspend it first, or remove the user from the cohort. The server will refuse this action."
             ar="هذا المسار مُزامَن من فوج — لا يمكن إلغاؤه مباشرة. أوقفه أولاً، أو أزل المستخدم من الفوج. سيرفض الخادم هذا الإجراء."
+          />
+        </p>
+      ) : path.method === "sis" && path.status === "active" ? (
+        <p className="enr-confirm__note enr-confirm__note--warn">
+          <Icon name="triangleAlert" size={16} />
+          <T
+            en="This path is managed by the SIS student portal (ENR-013/sis) — drop the registration in the portal instead. The server will refuse this action."
+            ar="هذا المسار يُدار عبر بوابة التسجيل — احذف التسجيل من البوابة بدلاً من هنا. سيرفض الخادم هذا الإجراء."
           />
         </p>
       ) : others.length > 0 ? (
